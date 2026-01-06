@@ -2,31 +2,9 @@
 
 Desktop application for creating 2D bin packing problem instances and visualizing their solutions.
 
-## Features
-
-### Input Configuration
-- **Manual Rectangle Entry**: Define rectangles with width, height, and quantity
-- **File Import**: Load rectangle configurations from `.txt`, `.in`, or `.csv` files
-- **Autofill Mode**: Automatically generate additional rectangles to meet specified constraints
-- **Input Validation**: Real-time validation with detailed error messages
-- **Export to JSON**: Generate algorithm-ready input files
-
-### Visualization
-- **Algorithm Output Import**: Load JSON files containing placement solutions
-- **Animated Display**: Watch rectangles appear one-by-one with adjustable animation speed
-- **Interactive Canvas**:
-  - **Zoom**: Mouse wheel to zoom in/out (10% - 1000%)
-  - **Pan**: Click and drag outside the bin to move the view
-  - **Rectangle Dragging**: Click and drag rectangles to reposition them
-  - **Hover Information**: See rectangle dimensions when hovering
-- **Smart Snapping**: Rectangles snap to bin edges when dragged close
-- **Collision Detection**: Visual feedback (green/red borders) for valid/invalid placements
-- **Height Recalculation**: Bin height automatically adjusts when rectangles are moved
-
-## Installation
 
 ### Prerequisites
-- **Rust**: Install from [rust-lang.org](https://www.rust-lang.org/tools/install)
+- Rust: Install https://www.rust-lang.org/tools/install
 
 
 ```bash
@@ -42,10 +20,10 @@ cargo run --release
 
 The application has the option that helps you create standardized input files for bin packing algorithms:
 
-1. **Set Bin Width** (Required): The fixed width of the bin
-2. **Set Rectangle Count** (Optional): Total number of rectangles (N)
-3. **Set Rectangle Types** (Optional): Number of unique rectangle dimensions (K)
-4. **Enable Autofill** (Optional): Let the app generate random rectangles to meet N and K constraints
+1. Set Bin Width (Required): The fixed width of the bin
+2. Set Rectangle Count (Optional): Total number of rectangles (N)
+3. Set Rectangle Types (Optional): Number of unique rectangle dimensions (K)
+4. Enable Autofill (Optional): Let the app generate random rectangles to meet N and K constraints
 
 #### Rectangle Data Format
 
@@ -53,9 +31,9 @@ Enter rectangles in the text editor using this format:
 ```
 X Y Q
 ```
-- **X**: Width of the rectangle
-- **Y**: Height of the rectangle
-- **Q**: Quantity of the type of rectangle
+- X: Width of the rectangle
+- Y: Height of the rectangle
+- Q: Quantity of the type of rectangle
 
 **Example:**
 ```
@@ -63,10 +41,6 @@ X Y Q
 15 15 3
 8 25 2
 ```
-This defines:
-- 5 rectangles of size 10 by 20
-- 3 rectangles of size 15 by 15
-- 2 rectangles of size 8 by 25
 
 #### Autofill 
 
@@ -94,7 +68,7 @@ When autofill is enabled:
 
 After your bin packing algorithm processes the input, visualize the results:
 
-1. Click **"Import Output JSON"**
+1. Click "Import Output JSON"
 2. Select a JSON file with this structure:
 ```json
 {
@@ -106,13 +80,6 @@ After your bin packing algorithm processes the input, visualize the results:
   ]
 }
 ```
-
-#### Placement Format
-- **x**: X-coordinate (left edge of rectangle)
-- **y**: Y-coordinate (bottom edge of rectangle)
-- **width**: Rectangle width
-- **height**: Rectangle height
-
 
 ## File Format Examples
 
