@@ -4,7 +4,7 @@ Desktop application for creating 2D bin packing problem instances and visualizin
 
 
 ### Prerequisites
-- Rust: Install https://www.rust-lang.org/tools/install
+Rust: Install https://www.rust-lang.org/tools/install
 
 
 ```bash
