@@ -1074,14 +1074,18 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             column![].height(16),
             output_container,
         ]
-        .spacing(0)
-        .width(Length::Fixed(440.0));
+        .spacing(0);
 
-        let left_panel_container = container(left_panel)
-            .width(Length::Fixed(440.0));
+        let left_panel_scrollable = scrollable(left_panel)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        let left_panel_container = container(left_panel_scrollable)
+            .width(Length::FillPortion(1))
+            .height(Length::Fill);
         
         let visualization = container(visualization_content)
-            .width(Length::Fill)
+            .width(Length::FillPortion(2))
             .height(Length::Fill)
             .padding(30)
             .center_x(Length::Fill)
@@ -1102,7 +1106,8 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             left_panel_container,
             visualization,
         ]
-        .spacing(16);
+        .spacing(16)
+        .height(Length::Fill);
         
         container(main_content)
             .width(Length::Fill)
