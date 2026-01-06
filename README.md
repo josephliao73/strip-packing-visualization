@@ -10,9 +10,9 @@ Rust: Install https://www.rust-lang.org/tools/install
 ```bash
 cd packing_interface
 
-cargo build --release
+cargo build
 
-cargo run --release
+cargo run
 ```
 
 
