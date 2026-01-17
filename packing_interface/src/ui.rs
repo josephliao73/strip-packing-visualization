@@ -1,5 +1,6 @@
 use crate::config_parser::{create_input};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, text_editor, scrollable, slider};
+use iced::highlighter::Theme as HighlighterTheme;
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::{HashSet};
 use iced::widget::canvas::{Canvas};
@@ -594,8 +595,8 @@ impl PackingApp {
         .padding(12)
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
-            let base_bg = Color::from_rgb(0.14, 0.16, 0.2);
-            let hover_bg = Color::from_rgb(0.18, 0.2, 0.25);
+            let base_bg = Color::from_rgb(0.14, 0.14, 0.17);
+            let hover_bg = Color::from_rgb(0.18, 0.18, 0.22);
 
             button::Style {
                 background: Some(match status {
@@ -603,14 +604,11 @@ impl PackingApp {
                     _ => base_bg.into(),
                 }),
                 border: iced::Border {
-                    color: match status {
-                        button::Status::Hovered => Color::from_rgb(0.3, 0.35, 0.45),
-                        _ => Color::from_rgb(0.22, 0.25, 0.32),
-                    },
+                    color: Color::from_rgb(0.24, 0.24, 0.28),
                     width: 1.0,
-                    radius: 8.0.into(),
+                    radius: 6.0.into(),
                 },
-                text_color: Color::from_rgb(0.85, 0.87, 0.9),
+                text_color: Color::from_rgb(0.75, 0.75, 0.78),
                 ..Default::default()
             }
         });
@@ -705,8 +703,8 @@ impl PackingApp {
         .padding(12)
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
-            let base_bg = Color::from_rgb(0.15, 0.32, 0.35);
-            let hover_bg = Color::from_rgb(0.18, 0.38, 0.42);
+            let base_bg = Color::from_rgb(0.22, 0.22, 0.26);
+            let hover_bg = Color::from_rgb(0.28, 0.28, 0.32);
 
             button::Style {
                 background: Some(match status {
@@ -714,11 +712,11 @@ impl PackingApp {
                     _ => base_bg.into(),
                 }),
                 border: iced::Border {
-                    color: Color::from_rgb(0.2, 0.4, 0.44),
+                    color: Color::from_rgb(0.32, 0.32, 0.38),
                     width: 1.0,
-                    radius: 8.0.into(),
+                    radius: 6.0.into(),
                 },
-                text_color: Color::from_rgb(0.75, 0.88, 0.9),
+                text_color: Color::from_rgb(0.9, 0.9, 0.92),
                 ..Default::default()
             }
         });
@@ -781,8 +779,8 @@ impl PackingApp {
         .padding(12)
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
-            let base_bg = Color::from_rgb(0.35, 0.28, 0.18);
-            let hover_bg = Color::from_rgb(0.42, 0.34, 0.22);
+            let base_bg = Color::from_rgb(0.18, 0.18, 0.22);
+            let hover_bg = Color::from_rgb(0.24, 0.24, 0.28);
 
             button::Style {
                 background: Some(match status {
@@ -790,11 +788,11 @@ impl PackingApp {
                     _ => base_bg.into(),
                 }),
                 border: iced::Border {
-                    color: Color::from_rgb(0.45, 0.38, 0.25),
+                    color: Color::from_rgb(0.28, 0.28, 0.34),
                     width: 1.0,
-                    radius: 8.0.into(),
+                    radius: 6.0.into(),
                 },
-                text_color: Color::from_rgb(0.9, 0.82, 0.7),
+                text_color: Color::from_rgb(0.85, 0.85, 0.88),
                 ..Default::default()
             }
         });
@@ -817,7 +815,7 @@ impl PackingApp {
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.45, 0.65, 0.68)),
+                    color: Some(Color::from_rgb(0.7, 0.7, 0.75)),
                 }
             });
 
@@ -904,9 +902,9 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                 container::Style {
                     background: Some(Color::from_rgb(0.1, 0.1, 0.13).into()),
                     border: iced::Border {
-                        color: Color::from_rgb(0.25, 0.45, 0.48),
+                        color: Color::from_rgb(0.35, 0.35, 0.4),
                         width: 1.0,
-                        radius: 8.0.into(),
+                        radius: 6.0.into(),
                     },
                     ..Default::default()
                 }
@@ -978,7 +976,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                 .font(ui_font)
                 .style(|_theme: &Theme| {
                     text::Style {
-                        color: Some(Color::from_rgb(0.45, 0.65, 0.68)),
+                        color: Some(Color::from_rgb(0.6, 0.6, 0.65)),
                     }
                 });
 
@@ -987,7 +985,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                 .font(ui_font)
                 .style(|_theme: &Theme| {
                     text::Style {
-                        color: Some(Color::from_rgb(0.45, 0.65, 0.68)),
+                        color: Some(Color::from_rgb(0.6, 0.6, 0.65)),
                     }
                 });
 
@@ -1113,70 +1111,111 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         let code_tab_active = self.active_tab == RightPanelTab::CodeEditor;
 
         let viz_tab = button(
-            text("Visualization").size(13).font(ui_font)
+            column![
+                text("Visualization").size(12).font(ui_font),
+                container(text(""))
+                    .width(Length::Fill)
+                    .height(2)
+                    .style(move |_theme: &Theme| {
+                        container::Style {
+                            background: if viz_tab_active {
+                                Some(Color::from_rgb(0.6, 0.6, 0.65).into())
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        }
+                    }),
+            ]
+            .spacing(6)
+            .align_x(Alignment::Center)
         )
         .on_press(Input::TabSelected(RightPanelTab::Visualization))
-        .padding([8, 16])
+        .padding([10, 20])
         .style(move |_theme: &Theme, status| {
-            let (bg, border_color) = if viz_tab_active {
-                (Color::from_rgb(0.12, 0.12, 0.15), Color::from_rgb(0.25, 0.45, 0.48))
-            } else {
-                match status {
-                    button::Status::Hovered => (Color::from_rgb(0.1, 0.1, 0.13), Color::from_rgb(0.2, 0.2, 0.26)),
-                    _ => (Color::from_rgb(0.08, 0.08, 0.1), Color::from_rgb(0.16, 0.16, 0.2)),
-                }
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.1, 0.1, 0.12),
+                _ => Color::TRANSPARENT,
             };
             button::Style {
                 background: Some(bg.into()),
                 border: iced::Border {
-                    color: border_color,
-                    width: 1.0,
-                    radius: 8.0.into(),
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
                 },
                 text_color: if viz_tab_active {
-                    Color::from_rgb(0.85, 0.87, 0.9)
+                    Color::from_rgb(0.9, 0.9, 0.92)
                 } else {
-                    Color::from_rgb(0.55, 0.55, 0.6)
+                    Color::from_rgb(0.5, 0.5, 0.55)
                 },
                 ..Default::default()
             }
         });
 
         let code_tab = button(
-            text("Code").size(13).font(ui_font)
+            column![
+                text("Code").size(12).font(ui_font),
+                container(text(""))
+                    .width(Length::Fill)
+                    .height(2)
+                    .style(move |_theme: &Theme| {
+                        container::Style {
+                            background: if code_tab_active {
+                                Some(Color::from_rgb(0.6, 0.6, 0.65).into())
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        }
+                    }),
+            ]
+            .spacing(6)
+            .align_x(Alignment::Center)
         )
         .on_press(Input::TabSelected(RightPanelTab::CodeEditor))
-        .padding([8, 16])
+        .padding([10, 20])
         .style(move |_theme: &Theme, status| {
-            let (bg, border_color) = if code_tab_active {
-                (Color::from_rgb(0.12, 0.12, 0.15), Color::from_rgb(0.25, 0.45, 0.48))
-            } else {
-                match status {
-                    button::Status::Hovered => (Color::from_rgb(0.1, 0.1, 0.13), Color::from_rgb(0.2, 0.2, 0.26)),
-                    _ => (Color::from_rgb(0.08, 0.08, 0.1), Color::from_rgb(0.16, 0.16, 0.2)),
-                }
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.1, 0.1, 0.12),
+                _ => Color::TRANSPARENT,
             };
             button::Style {
                 background: Some(bg.into()),
                 border: iced::Border {
-                    color: border_color,
-                    width: 1.0,
-                    radius: 8.0.into(),
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
                 },
                 text_color: if code_tab_active {
-                    Color::from_rgb(0.85, 0.87, 0.9)
+                    Color::from_rgb(0.9, 0.9, 0.92)
                 } else {
-                    Color::from_rgb(0.55, 0.55, 0.6)
+                    Color::from_rgb(0.5, 0.5, 0.55)
                 },
                 ..Default::default()
             }
         });
 
-        let tab_bar = row![
-            viz_tab,
-            code_tab,
-        ]
-        .spacing(4);
+        let tab_bar = container(
+            row![
+                viz_tab,
+                code_tab,
+            ]
+            .spacing(0)
+        )
+        .style(|_theme: &Theme| {
+            container::Style {
+                background: Some(Color::from_rgb(0.055, 0.055, 0.07).into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.12, 0.12, 0.15),
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .width(Length::Fill)
+        .padding([4, 8]);
 
         // Code editor content
         let language_label = text("Python")
@@ -1207,7 +1246,8 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             .height(Length::Fill)
             .padding(12)
             .size(13)
-            .font(Font::MONOSPACE);
+            .font(Font::MONOSPACE)
+            .highlight("py", HighlighterTheme::Base16Eighties);
 
         let code_editor_container = container(code_editor)
             .width(Length::Fill)

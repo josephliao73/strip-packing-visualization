@@ -104,7 +104,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
 
                 let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
-                let stroke_color = Color::from_rgb(0.4, 0.8, 1.0);
+                let stroke_color = Color::from_rgb(0.85, 0.85, 0.9);
                 frame.stroke(&rect_path, Stroke::default().with_color(stroke_color).with_width(2.0));
             }
 
