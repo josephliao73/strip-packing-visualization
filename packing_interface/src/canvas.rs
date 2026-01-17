@@ -209,13 +209,25 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 }
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                let dy = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => y,
-                    mouse::ScrollDelta::Pixels { y, .. } => y / 100.0,
-                };
+                if let Some(position) = cursor.position() {
+                    let canvas_rect = iced::Rectangle {
+                        x: bounds.x,
+                        y: bounds.y,
+                        width: bounds.width,
+                        height: bounds.height,
+                    };
 
-                let factor = if dy > 0.0 { 1.1 } else { 0.9 };
-                (canvas::event::Status::Captured, Some(Input::ZoomChanged(factor)))
+                    if canvas_rect.contains(position) {
+                        let dy = match delta {
+                            mouse::ScrollDelta::Lines { y, .. } => y,
+                            mouse::ScrollDelta::Pixels { y, .. } => y / 100.0,
+                        };
+
+                        let factor = if dy > 0.0 { 1.1 } else { 0.9 };
+                        return (canvas::event::Status::Captured, Some(Input::ZoomChanged(factor)));
+                    }
+                }
+                (canvas::event::Status::Ignored, None)
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position() {

@@ -3,6 +3,17 @@ use iced::widget::{text_editor};
 use std::collections::HashSet;
 use ordered_float::OrderedFloat;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPanelTab {
+    Visualization,
+    CodeEditor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeLanguage {
+    Python,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct Rectangle {
     pub width: i32,
@@ -41,6 +52,9 @@ pub enum Input {
     RectangleDragEnd(bool, bool, OrderedFloat<f32>, OrderedFloat<f32>),
     SnapAndAdjustHeight,
     RightClickCanvas(Option<usize>),
+    TabSelected(RightPanelTab),
+    CodeEditorAction(text_editor::Action),
+    LanguageSelected(CodeLanguage),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, PartialOrd, Hash, Eq, Copy)]
@@ -79,7 +93,10 @@ pub struct PackingApp {
     pub dragged_rect: Option<usize>,
     pub dragged_rect_offset_x: f32,
     pub dragged_rect_offset_y: f32,
-    pub selected_rects: HashSet<Placement>, 
+    pub selected_rects: HashSet<Placement>,
+    pub active_tab: RightPanelTab,
+    pub code_editor_content: text_editor::Content,
+    pub selected_language: CodeLanguage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
