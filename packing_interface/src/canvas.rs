@@ -3,6 +3,10 @@ use iced::widget::canvas::event::Event;
 use iced::mouse;
 use iced::{Color};
 use crate::types::{Input, BinCanvas};
+use iced::widget::canvas::{Frame, Path, Stroke, Fill};
+use iced::{Point, Size};
+use ordered_float::OrderedFloat;
+
 
 impl<'a> BinCanvas<'a> {
     fn find_rectangle_at_point(&self, x: f32, y: f32, bounds: &iced::Rectangle, scale: f32, origin_x: f32, origin_y: f32, bin_h_units: f32) -> Option<usize> {
@@ -15,8 +19,8 @@ impl<'a> BinCanvas<'a> {
         for (idx, p) in self.output.placements.iter().enumerate().take(count).rev() {
             let w = p.width as f32 * scale;
             let h = p.height as f32 * scale;
-            let rect_x = origin_x + p.x * scale;
-            let rect_y = origin_y + (bin_h_units - (p.y + p.height as f32)) * scale;
+            let rect_x = origin_x + p.x.into_inner() * scale;
+            let rect_y = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
 
             if local_x >= rect_x && local_x <= rect_x + w && local_y >= rect_y && local_y <= rect_y + h {
                 return Some(idx);
@@ -37,8 +41,6 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<iced::widget::canvas::Geometry> {
-        use iced::widget::canvas::{Frame, Path, Stroke, Fill};
-        use iced::{Point, Size};
 
         let mut frame = Frame::new(renderer, bounds.size());
 
@@ -76,23 +78,30 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
             let w = p.width as f32 * scale;
             let h = p.height as f32 * scale;
-            let x_px = origin_x + p.x * scale;
+            let x_px = origin_x + p.x.into_inner() * scale;
             let y_px = origin_y
-                + (bin_h_units - (p.y + p.height as f32)) * scale;
+                + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
 
             let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
             let color = color_from_dimensions(p.width, p.height);
             frame.fill(&rect_path, Fill::from(color));
-            frame.stroke(&rect_path, Stroke::default());
+
+            let is_selected = self.selected_rects.contains(p);
+            if is_selected {
+                let selected_stroke = Color::from_rgb(1.0, 0.0, 1.0);
+                frame.stroke(&rect_path, Stroke::default().with_color(selected_stroke).with_width(3.0));
+            } else {
+                frame.stroke(&rect_path, Stroke::default());
+            }
         }
 
         if let Some(hovered_idx) = self.hovered_rect && hovered_idx < count && self.dragged_rect != Some(hovered_idx) {
                 let p = &self.output.placements[hovered_idx];
                 let w = p.width as f32 * scale;
                 let h = p.height as f32 * scale;
-                let x_px = origin_x + p.x * scale;
+                let x_px = origin_x + p.x.into_inner() * scale;
                 let y_px = origin_y
-                    + (bin_h_units - (p.y + p.height as f32)) * scale;
+                    + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
 
                 let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
                 let stroke_color = Color::from_rgb(0.4, 0.8, 1.0);
@@ -103,9 +112,9 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 let p = &self.output.placements[dragged_idx];
                 let w = p.width as f32 * scale;
                 let h = p.height as f32 * scale;
-                let x_px = origin_x + p.x * scale + self.dragged_rect_offset_x;
+                let x_px = origin_x + p.x.into_inner() * scale + self.dragged_rect_offset_x;
                 let y_px = origin_y
-                    + (bin_h_units - (p.y + p.height as f32)) * scale + self.dragged_rect_offset_y;
+                    + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale + self.dragged_rect_offset_y;
 
                 println!("Dragging Rectangle #{}: Original({:.1}, {:.1}) + Offset({:.1}, {:.1}) = Screen({:.1}, {:.1}) | Bin Coords({:.1}, {:.1})",
                     dragged_idx,
@@ -127,12 +136,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     height: bin_h_units * scale,
                 };
 
-                let is_inside = bin_rect.contains(Point {x: x_px, y: y_px})
-                    && bin_rect.contains(Point {x: x_px + w, y: y_px})
-                    && bin_rect.contains(Point {x: x_px, y: y_px + h})
-                    && bin_rect.contains(Point {x: x_px + w, y: y_px + h});
-
-
+                let is_inside = is_inside(&bin_rect, x_px, y_px, w, h);
                 let mut intersects = false;
 
 
@@ -143,8 +147,8 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
                     let other_width = other.width as f32 * scale;
                     let other_height = other.height as f32 * scale;
-                    let other_x = origin_x + other.x * scale;
-                    let other_y = origin_y + (bin_h_units - (other.y + other.height as f32)) * scale;
+                    let other_x = origin_x + other.x.into_inner() * scale;
+                    let other_y = origin_y + (bin_h_units - (other.y.into_inner() + other.height as f32)) * scale;
 
                     intersects = !(x_px + w <= other_x ||
                                      x_px >= other_x + other_width ||
@@ -197,6 +201,13 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
         let origin_y = (bounds.height - draw_h) / 2.0 + self.pan_y;
 
         match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if self.hovered_rect.is_some() {
+                    (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
+                } else {
+                    (canvas::event::Status::Ignored, None)
+                }
+            }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let dy = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => y,
@@ -252,8 +263,8 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         let p = &self.output.placements[dragged_idx];
                         let w = p.width as f32 * scale;
                         let h = p.height as f32 * scale;
-                        let x_px = origin_x + p.x * scale + self.dragged_rect_offset_x;
-                        let y_px = origin_y + (bin_h_units - (p.y + p.height as f32)) * scale + self.dragged_rect_offset_y;
+                        let x_px = origin_x + p.x.into_inner() * scale + self.dragged_rect_offset_x;
+                        let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale + self.dragged_rect_offset_y;
 
                         let bin_rect = iced::Rectangle {
                             x: origin_x,
@@ -262,10 +273,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                             height: bin_h_units * scale,
                         };
 
-                        let is_inside = bin_rect.contains(iced::Point {x: x_px, y: y_px})
-                            && bin_rect.contains(iced::Point {x: x_px + w, y: y_px})
-                            && bin_rect.contains(iced::Point {x: x_px, y: y_px + h})
-                            && bin_rect.contains(iced::Point {x: x_px + w, y: y_px + h});
+                        let is_inside = is_inside(&bin_rect, x_px, y_px, w, h); 
 
                         let mut intersects = false;
                         for (idx, other) in self.output.placements.iter().enumerate() {
@@ -275,8 +283,8 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
                             let other_width = other.width as f32 * scale;
                             let other_height = other.height as f32 * scale;
-                            let other_x = origin_x + other.x * scale;
-                            let other_y = origin_y + (bin_h_units - (other.y + other.height as f32)) * scale;
+                            let other_x = origin_x + other.x.into_inner() * scale;
+                            let other_y = origin_y + (bin_h_units - (other.y.into_inner() + other.height as f32)) * scale;
 
                             intersects = !(x_px + w <= other_x ||
                                          x_px >= other_x + other_width ||
@@ -291,7 +299,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         let new_x = p.x + (self.dragged_rect_offset_x / scale);
                         let new_y = p.y - (self.dragged_rect_offset_y / scale);
 
-                        (canvas::event::Status::Captured, Some(Input::RectangleDragEnd(is_inside, intersects, new_x, new_y)))
+                        (canvas::event::Status::Captured, Some(Input::RectangleDragEnd(is_inside, intersects, *OrderedFloat(new_x), *OrderedFloat(new_y))))
                     } else {
                         (canvas::event::Status::Ignored, None)
                     }
@@ -327,4 +335,11 @@ fn color_from_dimensions(x: i32, y: i32) -> Color {
     let b = (((h >> 16) & 0xFF) as f32) / 255.0;
 
     Color::from_rgb(r, g, b)
+}
+
+fn is_inside(bin_rect: &iced::Rectangle, x:f32, y:f32, w:f32, h:f32) -> bool {
+    bin_rect.contains(Point {x, y})
+        && bin_rect.contains(Point {x: x + w, y})
+        && bin_rect.contains(Point {x, y: y + h})
+        && bin_rect.contains(Point {x: x + w, y: y + h})
 }

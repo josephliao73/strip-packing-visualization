@@ -3,8 +3,9 @@ use iced::widget::{button, checkbox, column, container, row, text, text_input, t
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::{HashSet};
 use iced::widget::canvas::{Canvas};
-use crate::types::{Rectangle, Input, PackingApp, AlgorithmOutput, ParseOutput, BinCanvas};
+use crate::types::{AlgorithmOutput, BinCanvas, Input, PackingApp, ParseOutput, Placement, Rectangle};
 use std::time::Duration;
+use ordered_float::{NotNan, OrderedFloat};
 
 impl Default for PackingApp {
     fn default() -> Self {
@@ -29,6 +30,7 @@ impl Default for PackingApp {
             dragged_rect: None,
             dragged_rect_offset_x: 0.0,
             dragged_rect_offset_y: 0.0,
+            selected_rects: HashSet::new() 
         }
     }
 }
@@ -174,16 +176,12 @@ impl PackingApp {
                 }
             }
             Input::RectangleDragEnd(is_inside, intersects, new_x, new_y) => {
-                if let Some(dragged_idx) = self.dragged_rect {
-                    if let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x, new_y, is_inside, intersects) {
-                        if let Some(output) = &mut self.algorithm_output {
-                            if dragged_idx < output.placements.len() {
-                                output.placements[dragged_idx].x = final_x;
-                                output.placements[dragged_idx].y = final_y;
+                if let Some(dragged_idx) = self.dragged_rect && 
+                    let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects) && 
+                        let Some(output) = &mut self.algorithm_output && dragged_idx < output.placements.len() {
+                                output.placements[dragged_idx].x = OrderedFloat(final_x);
+                                output.placements[dragged_idx].y = OrderedFloat(final_y);
                                 self.recalculate_bin_height();
-                            }
-                        }
-                    }
                 }
                 self.dragged_rect = None;
                 self.dragged_rect_offset_x = 0.0;
@@ -203,6 +201,16 @@ impl PackingApp {
             }
             Input::SnapAndAdjustHeight => {
                 self.recalculate_bin_height();
+            }
+            Input::RightClickCanvas(clicked_rect) => {
+                if let Some(idx) = clicked_rect {
+                    let cur_rect: Placement = self.algorithm_output.as_ref().unwrap().placements[idx];
+                    if !self.selected_rects.contains(&cur_rect) { 
+                        self.selected_rects.insert(self.algorithm_output.as_ref().unwrap().placements[idx]);
+                    } else {
+                        self.selected_rects.remove(&self.algorithm_output.as_ref().unwrap().placements[idx]);
+                    }
+                }
             }
         }
     }
@@ -270,14 +278,14 @@ impl PackingApp {
 
     fn recalculate_bin_height(&mut self) {
         if let Some(output) = &mut self.algorithm_output {
-            let mut max_height = 0.0;
+            let mut max_height = OrderedFloat(0.0);
             for placement in &output.placements {
                 let top = placement.y + placement.height as f32;
                 if top > max_height {
                     max_height = top;
                 }
             }
-            output.total_height = max_height;
+            output.total_height = max_height.into_inner();
         }
     }
 
@@ -836,6 +844,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             dragged_rect_offset_x: self.dragged_rect_offset_x,
             dragged_rect_offset_y: self.dragged_rect_offset_y,
             animating: self.animating,
+            selected_rects: &self.selected_rects,
         })
         .width(Length::Fill)
         .height(Length::Fill);

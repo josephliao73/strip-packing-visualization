@@ -1,5 +1,7 @@
 use serde::{Serialize, Deserialize};
 use iced::widget::{text_editor};
+use std::collections::HashSet;
+use ordered_float::OrderedFloat;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct Rectangle {
@@ -36,14 +38,15 @@ pub enum Input {
     RectangleHovered(Option<usize>),
     RectangleDragStart(usize, f32, f32),
     RectangleDragMove(f32, f32),
-    RectangleDragEnd(bool, bool, f32, f32),
+    RectangleDragEnd(bool, bool, OrderedFloat<f32>, OrderedFloat<f32>),
     SnapAndAdjustHeight,
+    RightClickCanvas(Option<usize>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, PartialOrd, Hash, Eq, Copy)]
 pub struct Placement {
-    pub x: f32,
-    pub y: f32,
+    pub x: OrderedFloat<f32>,
+    pub y: OrderedFloat<f32>,
     pub width: i32,
     pub height: i32,
 }
@@ -76,6 +79,7 @@ pub struct PackingApp {
     pub dragged_rect: Option<usize>,
     pub dragged_rect_offset_x: f32,
     pub dragged_rect_offset_y: f32,
+    pub selected_rects: HashSet<Placement>, 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -102,4 +106,5 @@ pub struct BinCanvas<'a>  {
     pub dragged_rect_offset_x: f32,
     pub dragged_rect_offset_y: f32,
     pub animating: bool,
+    pub selected_rects: &'a HashSet<Placement>,
 }
