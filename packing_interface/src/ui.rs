@@ -1,12 +1,14 @@
-use crate::config_parser::{create_input};
+use crate::config_parser::create_input;
+use crate::editor::{build_code_panel, EditorState};
+use crate::runner::{run_code, run_code_with_testcase, RunResult};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, text_editor, scrollable, slider};
-use iced::highlighter::Theme as HighlighterTheme;
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
-use std::collections::{HashSet};
-use iced::widget::canvas::{Canvas};
-use crate::types::{AlgorithmOutput, BinCanvas, CodeLanguage, Input, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab};
+use std::collections::HashSet;
+use std::fmt::format;
+use iced::widget::canvas::Canvas;
+use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab};
 use std::time::Duration;
-use ordered_float::{NotNan, OrderedFloat};
+use ordered_float::OrderedFloat;
 
 impl Default for PackingApp {
     fn default() -> Self {
@@ -33,8 +35,31 @@ impl Default for PackingApp {
             dragged_rect_offset_y: 0.0,
             selected_rects: HashSet::new(),
             active_tab: RightPanelTab::Visualization,
-            code_editor_content: text_editor::Content::with_text("# Write your algorithm here\n\ndef solve(bin_width, rectangles):\n    \"\"\"\n    Args:\n        bin_width: Width of the bin\n        rectangles: List of (width, height, quantity) tuples\n    Returns:\n        List of (x, y, width, height) placements\n    \"\"\"\n    placements = []\n    # Your code here\n    return placements\n"),
+            current_testcase: None,
+            testcase_message: None,
+            code_editor_content: text_editor::Content::with_text(r#"from typing import List, Tuple
+
+class Packing:
+    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
+        """
+        Pack rectangles into a bin of given width.
+
+        Args:
+            bin_width: Width of the bin
+            rectangles: List of (width, height, quantity) tuples
+
+        Returns:
+            List of (x, y, width, height) placements for each rectangle
+        """
+        placements = []
+        # Your packing algorithm here
+        return placements
+"#),
             selected_language: CodeLanguage::Python,
+            bottom_panel_visible: true,
+            bottom_panel_tab: BottomPanelTab::Problems,
+            code_errors: Vec::new(),
+            code_output_json: None,
         }
     }
 }
@@ -220,20 +245,194 @@ impl PackingApp {
                 self.active_tab = tab;
             }
             Input::CodeEditorAction(action) => {
-                self.code_editor_content.perform(action);
+                use iced::widget::text_editor::{Action, Edit};
+
+                match &action {
+                    Action::Edit(Edit::Enter) => {
+                        // Smart enter: maintain indentation and add extra if line ends with ':'
+                        let text = self.code_editor_content.text();
+                        let (line, _col) = self.code_editor_content.cursor_position();
+
+                        if let Some(current_line) = text.lines().nth(line) {
+                            // Get leading whitespace
+                            let leading_ws: String = current_line
+                                .chars()
+                                .take_while(|c| c.is_whitespace())
+                                .collect();
+
+                            // Check if line ends with ':' (Python block start)
+                            let trimmed = current_line.trim_end();
+                            let extra_indent = if trimmed.ends_with(':') {
+                                "    " // 4 spaces
+                            } else {
+                                ""
+                            };
+
+                            // Perform the enter action first
+                            self.code_editor_content.perform(action);
+
+                            // Then insert the indentation
+                            let indent = format!("{}{}", leading_ws, extra_indent);
+                            for c in indent.chars() {
+                                self.code_editor_content.perform(Action::Edit(Edit::Insert(c)));
+                            }
+                        } else {
+                            self.code_editor_content.perform(action);
+                        }
+                    }
+                    Action::Edit(Edit::Insert('\t')) => {
+                        // Replace tab with 4 spaces
+                        for _ in 0..4 {
+                            self.code_editor_content.perform(Action::Edit(Edit::Insert(' ')));
+                        }
+                    }
+                    Action::Edit(Edit::Backspace) => {
+                        // Smart backspace: delete 4 spaces at once if cursor is after indentation
+                        let text = self.code_editor_content.text();
+                        let (line, col) = self.code_editor_content.cursor_position();
+
+                        let should_delete_tab = if col >= 4 {
+                            if let Some(current_line) = text.lines().nth(line) {
+                                // Get the characters before the cursor on this line
+                                let chars_before: String = current_line.chars().take(col).collect();
+                                // Check if the last 4 characters are all spaces
+                                chars_before.ends_with("    ")
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        if should_delete_tab {
+                            // Delete 4 spaces (one tab-width)
+                            for _ in 0..4 {
+                                self.code_editor_content.perform(Action::Edit(Edit::Backspace));
+                            }
+                        } else {
+                            self.code_editor_content.perform(action);
+                        }
+                    }
+                    _ => {
+                        self.code_editor_content.perform(action);
+                    }
+                }
             }
             Input::LanguageSelected(lang) => {
                 self.selected_language = lang;
+            }
+            Input::RunCode => {
+                if let Some(testcase) = &self.current_testcase {
+                    let user_code = self.code_editor_content.text();
+                    let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
+
+                    match result {
+                        RunResult::Success { output, raw_json } => {
+                            self.algorithm_output = Some(output);
+                            self.visible_rects = 0;
+                            self.animating = true;
+                            self.active_tab = RightPanelTab::Visualization;
+                            self.error_message = Some("✓ Code executed successfully".to_string());
+                            self.code_output_json = Some(raw_json);
+                            self.code_errors.clear();
+                            self.bottom_panel_tab = BottomPanelTab::Output;
+                        }
+                        RunResult::Error { errors } => {
+                            self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
+                            self.code_errors = errors;
+                            self.code_output_json = None;
+                            self.bottom_panel_tab = BottomPanelTab::Problems;
+                        }
+                    }
+                } else {
+                    self.error_message = Some("No test case loaded. Import a test case first.".to_string());
+                    self.bottom_panel_tab = BottomPanelTab::TestCases;
+                }
+            }
+            Input::BottomPanelTabSelected(tab) => {
+                self.bottom_panel_tab = tab;
+            }
+            Input::ToggleBottomPanel => {
+                self.bottom_panel_visible = !self.bottom_panel_visible;
+            }
+            Input::SaveOutputToFile => {
+                if let Some(json) = &self.code_output_json {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("JSON file", &["json"])
+                        .set_file_name("algorithm_output.json")
+                        .save_file()
+                    {
+                        match std::fs::write(&path, json) {
+                            Ok(_) => {
+                                self.error_message = Some(format!("✓ Output saved to {}", path.display()));
+                            }
+                            Err(e) => {
+                                self.error_message = Some(format!("Failed to save file: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+            Input::InsertTab => {
+                use iced::widget::text_editor::{Action, Edit};
+                // Insert 4 spaces (tab-width) into the code editor
+                for _ in 0..4 {
+                    self.code_editor_content.perform(Action::Edit(Edit::Insert(' ')));
+                }
+            }
+            Input::ImportTestCase => {
+                if let Some(file_path) = rfd::FileDialog::new().add_filter("JSON files", &["json"]).pick_file() {
+                    match std::fs::read_to_string(&file_path) {
+                        Ok(contents) => {
+                            match serde_json::from_str::<JsonInput>(&contents) {
+                                Ok(output) => {
+                                    let msg = format!("✓ Loaded: {} rectangles, bin width {}",
+                                        output.rectangle_list.len(),
+                                        output.width_of_bin);
+                                    self.current_testcase = Some(output);
+                                    self.testcase_message = Some(msg);
+                                }
+                                Err(e) => {
+                                    self.testcase_message = Some(format!("Error parsing JSON: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.testcase_message = Some(format!("Error reading file: {}", e));
+                        }
+                    }
+                }
+            }
+            Input::GenerateTestCase => {
+                println!("Generate Test Case button pressed");
             }
         }
     }
 
     pub fn subscription(&self) -> Subscription<Input> {
+        use iced::keyboard;
+
+        let mut subscriptions = vec![];
+
         if self.animating {
-            time::every(Duration::from_millis(self.animation_speed as u64)).map(|_| Input::Tick)
-        } else {
-            Subscription::none()
+            subscriptions.push(
+                time::every(Duration::from_millis(self.animation_speed as u64)).map(|_| Input::Tick)
+            );
         }
+
+        if self.active_tab == RightPanelTab::CodeEditor {
+            subscriptions.push(
+                keyboard::on_key_press(|key, modifiers| {
+                    if key == keyboard::Key::Named(keyboard::key::Named::Tab) && modifiers.is_empty() {
+                        Some(Input::InsertTab)
+                    } else {
+                        None
+                    }
+                })
+            );
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     fn try_snap_rectangle(&self, rect_idx: usize, new_x: f32, new_y: f32, is_inside: bool, intersects: bool) -> Option<(f32, f32)> {
@@ -957,7 +1156,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                         }
                     }),
                 column![].height(8),
-                text("Import Output JSON to see the packing result")
+                text("Import Output JSON or Run Custom Algorithm to see the packing result")
                     .size(12)
                     .font(ui_font)
                     .style(|_theme: &Theme| {
@@ -1217,63 +1416,19 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         .width(Length::Fill)
         .padding([4, 8]);
 
-        // Code editor content
-        let language_label = text("Python")
-            .size(12)
-            .font(ui_font)
-            .style(|_theme: &Theme| {
-                text::Style {
-                    color: Some(Color::from_rgb(0.55, 0.55, 0.6)),
-                }
-            });
-
-        let language_dropdown = container(language_label)
-            .padding([6, 12])
-            .style(|_theme: &Theme| {
-                container::Style {
-                    background: Some(Color::from_rgb(0.1, 0.1, 0.13).into()),
-                    border: iced::Border {
-                        color: Color::from_rgb(0.2, 0.2, 0.26),
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-
-        let code_editor = text_editor(&self.code_editor_content)
-            .on_action(Input::CodeEditorAction)
-            .height(Length::Fill)
-            .padding(12)
-            .size(13)
-            .font(Font::MONOSPACE)
-            .highlight("py", HighlighterTheme::Base16Eighties);
-
-        let code_editor_container = container(code_editor)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| {
-                container::Style {
-                    background: Some(Color::from_rgb(0.05, 0.05, 0.07).into()),
-                    border: iced::Border {
-                        color: Color::from_rgb(0.16, 0.16, 0.2),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-
-        let code_panel_content = column![
-            row![
-                language_dropdown,
-            ].spacing(8),
-            column![].height(12),
-            code_editor_container,
-        ]
-        .spacing(0)
-        .width(Length::Fill)
-        .height(Length::Fill);
+        // Code editor panel (built from editor module)
+        let editor_state = EditorState {
+            code_editor_content: &self.code_editor_content,
+            selected_language: self.selected_language,
+            bottom_panel_visible: self.bottom_panel_visible,
+            bottom_panel_tab: self.bottom_panel_tab,
+            code_errors: &self.code_errors,
+            code_output_json: self.code_output_json.as_deref(),
+            show_visualization_button: false,
+            testcase_message: self.testcase_message.as_deref(),
+            testcase: self.current_testcase.as_ref(),
+        };
+        let code_panel_content = build_code_panel(&editor_state);
 
         // Right panel content based on active tab
         let right_panel_content: Element<'_, Input> = match self.active_tab {

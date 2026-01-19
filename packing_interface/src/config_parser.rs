@@ -59,3 +59,4 @@ pub fn create_input(input: &ParseOutput) -> JsonInput {
         rectangle_list: final_rect_list
     }
 }
+

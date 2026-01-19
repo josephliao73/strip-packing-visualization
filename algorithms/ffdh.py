@@ -29,7 +29,6 @@ for rect in items:
     for level in levels:
         if level["used_width"] + w <= bin_width:
 
-            # place here
             x = level["used_width"]
             y = level["y"]
 

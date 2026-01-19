@@ -10,8 +10,17 @@ pub enum RightPanelTab {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BottomPanelTab {
+    Problems,
+    Output,
+    TestCases,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeLanguage {
     Python,
+    Cpp,
+    Java,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -55,9 +64,20 @@ pub enum Input {
     TabSelected(RightPanelTab),
     CodeEditorAction(text_editor::Action),
     LanguageSelected(CodeLanguage),
+    RunCode,
+    // Bottom panel inputs
+    BottomPanelTabSelected(BottomPanelTab),
+    ToggleBottomPanel,
+    SaveOutputToFile,
+    // Keyboard input for code editor
+    InsertTab,
+    // Test cases inputs
+    ImportTestCase,
+    GenerateTestCase,
+
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, PartialOrd, Hash, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]
 pub struct Placement {
     pub x: OrderedFloat<f32>,
     pub y: OrderedFloat<f32>,
@@ -65,7 +85,7 @@ pub struct Placement {
     pub height: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AlgorithmOutput {
     pub bin_width: i32,
     pub total_height: f32,
@@ -95,11 +115,18 @@ pub struct PackingApp {
     pub dragged_rect_offset_y: f32,
     pub selected_rects: HashSet<Placement>,
     pub active_tab: RightPanelTab,
+    pub current_testcase: Option<JsonInput>,
+    pub testcase_message: Option<String>,
     pub code_editor_content: text_editor::Content,
     pub selected_language: CodeLanguage,
+    // Bottom panel state
+    pub bottom_panel_visible: bool,
+    pub bottom_panel_tab: BottomPanelTab,
+    pub code_errors: Vec<String>,
+    pub code_output_json: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ParseOutput {
     pub width: i32,
     pub quantity: i32,

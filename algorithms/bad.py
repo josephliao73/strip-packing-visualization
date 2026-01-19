@@ -1,6 +1,6 @@
 import json
 
-with open("./bad_input.json") as f:
+with open("./hellotest.json") as f:
     d = json.load(f)
 
 bin_width = d["width_of_bin"]

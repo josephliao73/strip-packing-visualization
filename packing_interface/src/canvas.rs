@@ -85,13 +85,24 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
             let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
             let color = color_from_dimensions(p.width, p.height);
             frame.fill(&rect_path, Fill::from(color));
+            frame.stroke(&rect_path, Stroke::default());
+        }
 
-            let is_selected = self.selected_rects.contains(p);
-            if is_selected {
-                let selected_stroke = Color::from_rgb(1.0, 0.0, 1.0);
+        for (idx, p) in self.output.placements.iter().enumerate().take(count) {
+            if self.dragged_rect == Some(idx) {
+                continue;
+            }
+
+            if self.selected_rects.contains(p) {
+                let w = p.width as f32 * scale;
+                let h = p.height as f32 * scale;
+                let x_px = origin_x + p.x.into_inner() * scale;
+                let y_px = origin_y
+                    + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
+
+                let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
+                let selected_stroke = Color::from_rgb(0.0, 0.85, 0.95);
                 frame.stroke(&rect_path, Stroke::default().with_color(selected_stroke).with_width(3.0));
-            } else {
-                frame.stroke(&rect_path, Stroke::default());
             }
         }
 
