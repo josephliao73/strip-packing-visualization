@@ -6,7 +6,7 @@ use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use std::fmt::format;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab};
+use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab, Settings};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -64,6 +64,14 @@ class Packing:
             bottom_panel_tab: BottomPanelTab::Problems,
             code_errors: Vec::new(),
             code_output_json: None,
+            settings: Settings {
+                area_select_enabled: true,
+                snap_to_rectangles_enabled: true,
+            },
+            settings_panel_visible: false,
+            area_select_start: None,
+            area_select_current: None,
+            is_area_selecting: false,
         }
     }
 }
@@ -510,6 +518,41 @@ impl PackingApp {
                 self.current_testcase = Some(testcase);
                 self.testcase_message = Some(msg);
             }
+            Input::ToggleAreaSelectEnabled(enabled) => {
+                self.settings.area_select_enabled = enabled;
+            }
+            Input::ToggleSnapToRectangles(enabled) => {
+                self.settings.snap_to_rectangles_enabled = enabled;
+            }
+            Input::ToggleSettingsPanel => {
+                self.settings_panel_visible = !self.settings_panel_visible;
+            }
+            Input::AreaSelectStart(x, y) => {
+                self.is_area_selecting = true;
+                self.area_select_start = Some((x, y));
+                self.area_select_current = Some((x, y));
+            }
+            Input::AreaSelectMove(x, y) => {
+                if self.is_area_selecting {
+                    self.area_select_current = Some((x, y));
+                }
+            }
+            Input::AreaSelectEnd(selected_indices) => {
+                // Add all rectangles within the selection area to selected_rects
+                if let Some(output) = &self.algorithm_output {
+                    for idx in selected_indices {
+                        if idx < output.placements.len() {
+                            let placement = output.placements[idx];
+                            if !self.selected_rects.contains(&placement) {
+                                self.selected_rects.insert(placement);
+                            }
+                        }
+                    }
+                }
+                self.is_area_selecting = false;
+                self.area_select_start = None;
+                self.area_select_current = None;
+            }
         }
     }
 
@@ -541,6 +584,7 @@ impl PackingApp {
 
     fn try_snap_rectangle(&self, rect_idx: usize, new_x: f32, new_y: f32, is_inside: bool, intersects: bool) -> Option<(f32, f32)> {
         const SNAP_MARGIN_PERCENTAGE: f32 = 0.05;
+        const RECT_SNAP_THRESHOLD: f32 = 5.0; // Snap threshold in bin units for rectangle-to-rectangle snapping
 
         if let Some(output) = &self.algorithm_output {
             if rect_idx >= output.placements.len() {
@@ -558,10 +602,17 @@ impl PackingApp {
             let mut final_x = new_x;
             let mut final_y = new_y;
 
+            // If position is valid, check for rectangle snapping
             if is_inside && !intersects {
+                // Try snapping to other rectangles if enabled
+                if self.settings.snap_to_rectangles_enabled {
+                    let (snapped_x, snapped_y) = self.snap_to_rectangles(rect_idx, new_x, new_y, rect_width, rect_height, RECT_SNAP_THRESHOLD);
+                    return Some((snapped_x, snapped_y));
+                }
                 return Some((new_x, new_y));
             }
 
+            // Try bin edge snapping
             if !intersects && !is_inside {
                 let mut snapped = false;
 
@@ -590,6 +641,92 @@ impl PackingApp {
         } else {
             None
         }
+    }
+
+    fn snap_to_rectangles(&self, rect_idx: usize, new_x: f32, new_y: f32, rect_width: f32, rect_height: f32, threshold: f32) -> (f32, f32) {
+        let mut final_x = new_x;
+        let mut final_y = new_y;
+        let mut min_dist_x = threshold;
+        let mut min_dist_y = threshold;
+
+        if let Some(output) = &self.algorithm_output {
+            // Edges of the dragged rectangle
+            let left = new_x;
+            let right = new_x + rect_width;
+            let bottom = new_y;
+            let top = new_y + rect_height;
+
+            for (idx, other) in output.placements.iter().enumerate() {
+                if idx == rect_idx {
+                    continue;
+                }
+
+                let other_left = other.x.into_inner();
+                let other_right = other_left + other.width as f32;
+                let other_bottom = other.y.into_inner();
+                let other_top = other_bottom + other.height as f32;
+
+                // Check horizontal snapping (left edge to right edge, right edge to left edge, etc.)
+                // Snap left to other's right
+                let dist = (left - other_right).abs();
+                if dist < min_dist_x {
+                    min_dist_x = dist;
+                    final_x = other_right;
+                }
+
+                // Snap right to other's left
+                let dist = (right - other_left).abs();
+                if dist < min_dist_x {
+                    min_dist_x = dist;
+                    final_x = other_left - rect_width;
+                }
+
+                // Snap left to other's left (align)
+                let dist = (left - other_left).abs();
+                if dist < min_dist_x {
+                    min_dist_x = dist;
+                    final_x = other_left;
+                }
+
+                // Snap right to other's right (align)
+                let dist = (right - other_right).abs();
+                if dist < min_dist_x {
+                    min_dist_x = dist;
+                    final_x = other_right - rect_width;
+                }
+
+                // Check vertical snapping
+                // Snap bottom to other's top
+                let dist = (bottom - other_top).abs();
+                if dist < min_dist_y {
+                    min_dist_y = dist;
+                    final_y = other_top;
+                }
+
+                // Snap top to other's bottom
+                let dist = (top - other_bottom).abs();
+                if dist < min_dist_y {
+                    min_dist_y = dist;
+                    final_y = other_bottom - rect_height;
+                }
+
+                // Snap bottom to other's bottom (align)
+                let dist = (bottom - other_bottom).abs();
+                if dist < min_dist_y {
+                    min_dist_y = dist;
+                    final_y = other_bottom;
+                }
+
+                // Snap top to other's top (align)
+                let dist = (top - other_top).abs();
+                if dist < min_dist_y {
+                    min_dist_y = dist;
+                    final_y = other_top - rect_height;
+                }
+            }
+        }
+
+        (final_x, final_y)
     }
 
     fn recalculate_bin_height(&mut self) {
@@ -1147,6 +1284,153 @@ impl PackingApp {
                 }
             });
 
+// Settings gear button (always visible)
+        let settings_panel_visible = self.settings_panel_visible;
+        let gear_button = button(
+            container(
+                column![
+                    row![
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                        column![].width(2),
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                    ],
+                    column![].height(2),
+                    row![
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                        column![].width(2),
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                    ],
+                    column![].height(2),
+                    row![
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                        column![].width(2),
+                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
+                            container::Style {
+                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
+                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                    ],
+                ]
+            )
+            .padding(4)
+        )
+        .on_press(Input::ToggleSettingsPanel)
+        .padding(4)
+        .style(move |_theme: &Theme, status| {
+            let base_bg = if settings_panel_visible {
+                Color::from_rgb(0.2, 0.25, 0.35)
+            } else {
+                Color::from_rgba(0.12, 0.12, 0.15, 0.9)
+            };
+            let hover_bg = Color::from_rgba(0.22, 0.22, 0.28, 0.95);
+
+            button::Style {
+                background: Some(match status {
+                    button::Status::Hovered => hover_bg.into(),
+                    _ => base_bg.into(),
+                }),
+                border: iced::Border {
+                    color: Color::from_rgb(0.3, 0.3, 0.35),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                text_color: Color::from_rgb(0.75, 0.75, 0.8),
+                ..Default::default()
+            }
+        });
+
+        // Settings popup panel
+        let area_select_enabled = self.settings.area_select_enabled;
+        let snap_to_rects_enabled = self.settings.snap_to_rectangles_enabled;
+
+        let settings_popup: Element<'_, Input> = if self.settings_panel_visible {
+            let area_select_checkbox = checkbox("Area Selection (Right-drag)", area_select_enabled)
+                .on_toggle(Input::ToggleAreaSelectEnabled)
+                .size(14)
+                .font(ui_font)
+                .text_size(11);
+
+            let snap_checkbox = checkbox("Snap to Rectangles", snap_to_rects_enabled)
+                .on_toggle(Input::ToggleSnapToRectangles)
+                .size(14)
+                .font(ui_font)
+                .text_size(11);
+
+            container(
+                column![
+                    text("Settings").size(12).font(ui_font).style(|_theme: &Theme| {
+                        text::Style {
+                            color: Some(Color::from_rgb(0.7, 0.7, 0.75)),
+                        }
+                    }),
+                    column![].height(8),
+                    area_select_checkbox,
+                    column![].height(4),
+                    snap_checkbox,
+                ]
+                .spacing(4)
+            )
+            .padding(12)
+            .style(|_theme: &Theme| {
+                container::Style {
+                    background: Some(Color::from_rgb(0.08, 0.08, 0.1).into()),
+                    border: iced::Border {
+                        color: Color::from_rgb(0.25, 0.25, 0.32),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
+        } else {
+            column![].into()
+        };
+
+        // Top-right corner with gear and popup
+        let settings_corner: Element<'_, Input> = column![
+            row![
+                column![].width(Length::Fill),
+                gear_button,
+            ],
+            settings_popup,
+        ]
+        .spacing(4)
+        .align_x(Alignment::End)
+        .into();
+
 let visualization_content = if let Some(output) = &self.algorithm_output {
     let canvas = Canvas::new(BinCanvas {
             output,
@@ -1161,6 +1445,10 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             dragged_rect_offset_y: self.dragged_rect_offset_y,
             animating: self.animating,
             selected_rects: &self.selected_rects,
+            is_area_selecting: self.is_area_selecting,
+            area_select_start: self.area_select_start,
+            area_select_current: self.area_select_current,
+            settings: &self.settings,
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -1236,41 +1524,72 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
     };
 
     column![
-        container(canvas)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+        container(
+            iced::widget::stack![
+                container(canvas)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                container(settings_corner)
+                    .width(Length::Fill)
+                    .padding(8)
+                    .align_right(Length::Fill),
+            ]
+        )
+        .width(Length::Fill)
+        .height(Length::Fill),
         column![].height(16),
         row![
             dimensions_display.width(Length::Fill),
             height_display.width(Length::Fill),
         ]
         .spacing(16)
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
     ]
     .align_x(Alignment::Center)
     .spacing(8)
         } else {
             column![
-                text("Visualization Area")
-                    .size(16)
-                    .font(ui_font)
-                    .style(|_theme: &Theme| {
-                        text::Style {
-                            color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
-                        }
-                    }),
-                column![].height(8),
-                text("Import Output JSON or Run Custom Algorithm to see the packing result")
-                    .size(12)
-                    .font(ui_font)
-                    .style(|_theme: &Theme| {
-                        text::Style {
-                            color: Some(Color::from_rgb(0.4, 0.4, 0.47)),
-                        }
-                    }),
+                container(
+                    iced::widget::stack![
+                        container(
+                            column![
+                                text("Visualization Area")
+                                    .size(16)
+                                    .font(ui_font)
+                                    .style(|_theme: &Theme| {
+                                        text::Style {
+                                            color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                                        }
+                                    }),
+                                column![].height(8),
+                                text("Import Output JSON or Run Custom Algorithm to see the packing result")
+                                    .size(12)
+                                    .font(ui_font)
+                                    .style(|_theme: &Theme| {
+                                        text::Style {
+                                            color: Some(Color::from_rgb(0.4, 0.4, 0.47)),
+                                        }
+                                    }),
+                            ]
+                            .align_x(Alignment::Center)
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                        container(settings_corner)
+                            .width(Length::Fill)
+                            .padding(8)
+                            .align_right(Length::Fill),
+                    ]
+                )
+                .width(Length::Fill)
+                .height(Length::Fill),
             ]
             .align_x(Alignment::Center)
             .width(Length::Fill)
+            .height(Length::Fill)
         };
         
         let stats_display = if let Some(output) = &self.algorithm_output {

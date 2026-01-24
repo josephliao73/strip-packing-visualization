@@ -3,6 +3,12 @@ use iced::widget::{text_editor};
 use std::collections::HashSet;
 use ordered_float::OrderedFloat;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Settings {
+    pub area_select_enabled: bool,
+    pub snap_to_rectangles_enabled: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPanelTab {
     Visualization,
@@ -74,7 +80,14 @@ pub enum Input {
     // Test cases inputs
     ImportTestCase,
     GenerateTestCase,
-
+    // Settings inputs
+    ToggleAreaSelectEnabled(bool),
+    ToggleSnapToRectangles(bool),
+    ToggleSettingsPanel,
+    // Area selection inputs
+    AreaSelectStart(f32, f32),
+    AreaSelectMove(f32, f32),
+    AreaSelectEnd(Vec<usize>),  // Contains indices of rectangles in the selection area
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]
@@ -124,6 +137,13 @@ pub struct PackingApp {
     pub bottom_panel_tab: BottomPanelTab,
     pub code_errors: Vec<String>,
     pub code_output_json: Option<String>,
+    // Settings
+    pub settings: Settings,
+    pub settings_panel_visible: bool,
+    // Area selection state
+    pub area_select_start: Option<(f32, f32)>,
+    pub area_select_current: Option<(f32, f32)>,
+    pub is_area_selecting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -151,4 +171,8 @@ pub struct BinCanvas<'a>  {
     pub dragged_rect_offset_y: f32,
     pub animating: bool,
     pub selected_rects: &'a HashSet<Placement>,
+    pub is_area_selecting: bool,
+    pub area_select_start: Option<(f32, f32)>,
+    pub area_select_current: Option<(f32, f32)>,
+    pub settings: &'a Settings,
 }

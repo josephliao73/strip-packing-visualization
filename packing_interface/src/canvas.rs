@@ -28,6 +28,45 @@ impl<'a> BinCanvas<'a> {
         }
         None
     }
+
+    pub fn find_rectangles_in_area(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32, bounds: &iced::Rectangle, scale: f32, origin_x: f32, origin_y: f32, bin_h_units: f32) -> Vec<usize> {
+        let total = self.output.placements.len();
+        let count = self.visible_count.min(total);
+
+        // Convert to local coordinates
+        let local_start_x = start_x - bounds.x;
+        let local_start_y = start_y - bounds.y;
+        let local_end_x = end_x - bounds.x;
+        let local_end_y = end_y - bounds.y;
+
+        // Normalize selection area (handle any drag direction)
+        let sel_min_x = local_start_x.min(local_end_x);
+        let sel_max_x = local_start_x.max(local_end_x);
+        let sel_min_y = local_start_y.min(local_end_y);
+        let sel_max_y = local_start_y.max(local_end_y);
+
+        let mut result = Vec::new();
+
+        for (idx, p) in self.output.placements.iter().enumerate().take(count) {
+            let w = p.width as f32 * scale;
+            let h = p.height as f32 * scale;
+            let rect_x = origin_x + p.x.into_inner() * scale;
+            let rect_y = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
+
+            // Check if rectangle intersects with selection area
+            let rect_min_x = rect_x;
+            let rect_max_x = rect_x + w;
+            let rect_min_y = rect_y;
+            let rect_max_y = rect_y + h;
+
+            // Intersection check
+            if rect_max_x >= sel_min_x && rect_min_x <= sel_max_x &&
+               rect_max_y >= sel_min_y && rect_min_y <= sel_max_y {
+                result.push(idx);
+            }
+        }
+        result
+    }
 }
 
 impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
@@ -180,8 +219,27 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     Color::from_rgb(1.0, 0.0, 0.0)
                 };
                 frame.stroke(&rect_path, Stroke::default().with_color(stroke_color).with_width(2.0));
-                
+
             }
+
+        // Draw area selection rectangle
+        if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((current_x, current_y)) = self.area_select_current {
+            let local_start_x = start_x - bounds.x;
+            let local_start_y = start_y - bounds.y;
+            let local_current_x = current_x - bounds.x;
+            let local_current_y = current_y - bounds.y;
+
+            let sel_x = local_start_x.min(local_current_x);
+            let sel_y = local_start_y.min(local_current_y);
+            let sel_w = (local_current_x - local_start_x).abs();
+            let sel_h = (local_current_y - local_start_y).abs();
+
+            let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
+            // Semi-transparent blue fill
+            frame.fill(&sel_path, Fill::from(Color::from_rgba(0.2, 0.4, 0.8, 0.2)));
+            // Blue stroke
+            frame.stroke(&sel_path, Stroke::default().with_color(Color::from_rgb(0.3, 0.5, 0.9)).with_width(1.5));
+        }
 
         vec![frame.into_geometry()]
     }
@@ -213,8 +271,29 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
-                if self.hovered_rect.is_some() {
-                    (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
+                if let Some(position) = cursor.position() {
+                    if self.hovered_rect.is_some() {
+                        // Clicking on a rectangle - toggle selection
+                        (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
+                    } else if self.settings.area_select_enabled {
+                        // Start area selection if enabled and not on a rectangle
+                        (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
+                    } else {
+                        (canvas::event::Status::Ignored, None)
+                    }
+                } else {
+                    (canvas::event::Status::Ignored, None)
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
+                if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((end_x, end_y)) = self.area_select_current {
+                    let selected_indices = self.find_rectangles_in_area(
+                        start_x, start_y, end_x, end_y,
+                        &bounds, scale, origin_x, origin_y, bin_h_units
+                    );
+                    (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(selected_indices)))
+                } else if self.is_area_selecting {
+                    (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(Vec::new())))
                 } else {
                     (canvas::event::Status::Ignored, None)
                 }
@@ -333,7 +412,9 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 let hovered = self.find_rectangle_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_h_units);
 
-                if self.is_panning {
+                if self.is_area_selecting {
+                    (canvas::event::Status::Captured, Some(Input::AreaSelectMove(position.x, position.y)))
+                } else if self.is_panning {
                     (canvas::event::Status::Captured, Some(Input::PanMove(position.x, position.y)))
                 } else if self.dragged_rect.is_some() {
                     (canvas::event::Status::Captured, Some(Input::RectangleDragMove(position.x, position.y)))
