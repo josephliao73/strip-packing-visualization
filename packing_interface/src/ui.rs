@@ -6,7 +6,7 @@ use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use std::fmt::format;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab, Settings};
+use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, Settings};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -19,8 +19,11 @@ impl Default for PackingApp {
             k_input: String::new(),
             autofile: false,
             rectangle_data: text_editor::Content::new(),
+            rect_total_lines: 1,
+            rect_cursor_line: 1,
             error_message: None,
             algorithm_output: None,
+            output_revision: 0,
             zoom: 1.0,
             visible_rects: 0,
             animating: false,
@@ -116,6 +119,7 @@ impl PackingApp {
                                             .join("\n");
 
                                         self.rectangle_data = text_editor::Content::with_text(&rect_text);
+                                        self.update_rectangle_line_info();
                                         self.error_message = Some(format!(
                                             "✓ Imported JSON: {} rectangle types, bin width {}",
                                             json_input.rectangle_list.len(),
@@ -129,6 +133,7 @@ impl PackingApp {
                             } else {
                                 // Handle text files as before
                                 self.rectangle_data = text_editor::Content::with_text(&contents);
+                                self.update_rectangle_line_info();
                                 self.error_message = None;
                             }
                         }
@@ -150,6 +155,8 @@ impl PackingApp {
                                     self.algorithm_output = Some(output);
                                     self.visible_rects = 0;
                                     self.animating = true;
+                                    self.selected_rects.clear();
+                                    self.output_revision = self.output_revision.wrapping_add(1);
                                     self.error_message = Some("✓ Successfully imported algorithm output".to_string());
                                 }
                                 Err(e) => {
@@ -165,6 +172,7 @@ impl PackingApp {
             }
             Input::RectangleDataAction(action) => {
                 self.rectangle_data.perform(action);
+                self.update_rectangle_line_info();
             }
 
             Input::ExportAlgorithmInput => {
@@ -279,11 +287,10 @@ impl PackingApp {
             }
             Input::RightClickCanvas(clicked_rect) => {
                 if let Some(idx) = clicked_rect {
-                    let cur_rect: Placement = self.algorithm_output.as_ref().unwrap().placements[idx];
-                    if !self.selected_rects.contains(&cur_rect) {
-                        self.selected_rects.insert(self.algorithm_output.as_ref().unwrap().placements[idx]);
+                    if !self.selected_rects.contains(&idx) {
+                        self.selected_rects.insert(idx);
                     } else {
-                        self.selected_rects.remove(&self.algorithm_output.as_ref().unwrap().placements[idx]);
+                        self.selected_rects.remove(&idx);
                     }
                 }
             }
@@ -378,6 +385,8 @@ impl PackingApp {
                             self.algorithm_output = Some(output);
                             self.visible_rects = 0;
                             self.animating = true;
+                            self.selected_rects.clear();
+                            self.output_revision = self.output_revision.wrapping_add(1);
                             self.active_tab = RightPanelTab::Visualization;
                             self.error_message = Some("✓ Code executed successfully".to_string());
                             self.code_output_json = Some(raw_json);
@@ -542,9 +551,8 @@ impl PackingApp {
                 if let Some(output) = &self.algorithm_output {
                     for idx in selected_indices {
                         if idx < output.placements.len() {
-                            let placement = output.placements[idx];
-                            if !self.selected_rects.contains(&placement) {
-                                self.selected_rects.insert(placement);
+                            if !self.selected_rects.contains(&idx) {
+                                self.selected_rects.insert(idx);
                             }
                         }
                     }
@@ -739,7 +747,22 @@ impl PackingApp {
                 }
             }
             output.total_height = max_height.into_inner();
+            self.output_revision = self.output_revision.wrapping_add(1);
         }
+    }
+
+    fn update_rectangle_line_info(&mut self) {
+        let text = self.rectangle_data.text();
+        let total_lines = if text.is_empty() || text == "\n" {
+            1
+        } else {
+            text.chars().filter(|&c| c == '\n').count() + 1
+        };
+        let (line, _col) = self.rectangle_data.cursor_position();
+        let cursor_line = (line + 1).min(total_lines);
+
+        self.rect_total_lines = total_lines;
+        self.rect_cursor_line = cursor_line;
     }
 
     fn parse_rectangles(&self) -> Result<ParseOutput, Vec<String>> {
@@ -1098,25 +1121,7 @@ impl PackingApp {
                 }
             });
         
-        let text_content = self.rectangle_data.text();
-        let total_lines = if text_content.is_empty() || text_content == "\n" { 
-            1 
-        } else { 
-            text_content.chars().filter(|&c| c == '\n').count() + 1
-        };
-
-        let cursor = self.rectangle_data.cursor_position();
-        let cursor_pos = cursor.0.min(text_content.len());
-        let lines_before_cursor = if cursor_pos == 0 || text_content.is_empty() {
-            1
-        } else {
-            text_content[..cursor_pos]
-                .chars()
-                .filter(|&c| c == '\n')
-                .count() + 1
-        };
-
-        let line_info = text(format!("Line {} of {}", lines_before_cursor, total_lines))
+        let line_info = text(format!("Line {} of {}", self.rect_cursor_line, self.rect_total_lines))
             .size(10)
             .font(ui_font)
             .style(|_theme: &Theme| {
@@ -1434,6 +1439,7 @@ impl PackingApp {
 let visualization_content = if let Some(output) = &self.algorithm_output {
     let canvas = Canvas::new(BinCanvas {
             output,
+            output_revision: self.output_revision,
             zoom: self.zoom,
             visible_count: self.visible_rects,
             pan_x: self.pan_x,
