@@ -9,6 +9,7 @@ use iced::widget::canvas::Canvas;
 use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Placement, Rectangle, RightPanelTab};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
+use rand::Rng;
 
 impl Default for PackingApp {
     fn default() -> Self {
@@ -37,7 +38,10 @@ impl Default for PackingApp {
             active_tab: RightPanelTab::Visualization,
             current_testcase: None,
             testcase_message: None,
-            code_editor_content: text_editor::Content::with_text(r#"from typing import List, Tuple
+            code_editor_content: text_editor::Content::with_text(r#"
+import packing_lib
+import json
+from typing import List, Tuple
 
 class Packing:
     def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
@@ -51,9 +55,9 @@ class Packing:
         Returns:
             List of (x, y, width, height) placements for each rectangle
         """
-        placements = []
+        placements = [[1,1,2,2], [3,3,1,1]]
         # Your packing algorithm here
-        return placements
+        return packing_lib.make_output(5, 6, placements)
 "#),
             selected_language: CodeLanguage::Python,
             bottom_panel_visible: true,
@@ -81,14 +85,48 @@ impl PackingApp {
             }
             Input::ImportPressed => {
                 if let Some(file_path) = rfd::FileDialog::new()
-                    .add_filter("Supported files", &["txt", "in", "csv"])
+                    .add_filter("Supported files", &["txt", "in", "csv", "json"])
                     .pick_file()
                 {
-                    if let Ok(contents) = std::fs::read_to_string(&file_path) {
-                        self.rectangle_data = text_editor::Content::with_text(&contents);
-                        self.error_message = None;
-                    } else {
-                        self.error_message = Some(format!("Error reading file: {:?}", file_path));
+                    match std::fs::read_to_string(&file_path) {
+                        Ok(contents) => {
+                            // Check if it's a JSON file
+                            if file_path.extension().map_or(false, |ext| ext == "json") {
+                                match serde_json::from_str::<JsonInput>(&contents) {
+                                    Ok(json_input) => {
+                                        // Populate form fields from JSON
+                                        self.w_input = json_input.width_of_bin.to_string();
+                                        self.n_input = json_input.number_of_rectangles.to_string();
+                                        self.k_input = json_input.number_of_types_of_rectangles.to_string();
+                                        self.autofile = json_input.autofill_option;
+
+                                        // Convert rectangles to text format (X Y Q per line)
+                                        let rect_text: String = json_input.rectangle_list
+                                            .iter()
+                                            .map(|r| format!("{} {} {}", r.width, r.height, r.quantity))
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+
+                                        self.rectangle_data = text_editor::Content::with_text(&rect_text);
+                                        self.error_message = Some(format!(
+                                            "✓ Imported JSON: {} rectangle types, bin width {}",
+                                            json_input.rectangle_list.len(),
+                                            json_input.width_of_bin
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.error_message = Some(format!("Error parsing JSON: {}", e));
+                                    }
+                                }
+                            } else {
+                                // Handle text files as before
+                                self.rectangle_data = text_editor::Content::with_text(&contents);
+                                self.error_message = None;
+                            }
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Error reading file: {}", e));
+                        }
                     }
                 }
             }
@@ -325,6 +363,7 @@ impl PackingApp {
                 if let Some(testcase) = &self.current_testcase {
                     let user_code = self.code_editor_content.text();
                     let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
+                    println!("{:?}", result);
 
                     match result {
                         RunResult::Success { output, raw_json } => {
@@ -404,7 +443,72 @@ impl PackingApp {
                 }
             }
             Input::GenerateTestCase => {
-                println!("Generate Test Case button pressed");
+                let mut rng = rand::rng();
+
+                // Constants for random generation
+                const MIN_BIN_WIDTH: i32 = 5;
+                const MAX_BIN_WIDTH: i32 = 20;
+                const MIN_HEIGHT: i32 = 1;
+                const MAX_HEIGHT: i32 = 20;
+                const MIN_TYPES: usize = 3;
+                const MAX_TYPES: usize = 20;
+                const MIN_TOTAL_RECTS: i32 = 10;
+                const MAX_TOTAL_RECTS: i32 = 100;
+
+                // Generate random bin width
+                let bin_width = rng.random_range(MIN_BIN_WIDTH..=MAX_BIN_WIDTH);
+
+                // Generate random number of rectangle types
+                let num_types = rng.random_range(MIN_TYPES..=MAX_TYPES);
+
+                // Generate unique rectangle types
+                let mut rect_set: HashSet<(i32, i32)> = HashSet::new();
+                let mut rectangles: Vec<Rectangle> = Vec::new();
+
+                while rect_set.len() < num_types {
+                    let width = rng.random_range(1..=bin_width);
+                    let height = rng.random_range(MIN_HEIGHT..=MAX_HEIGHT);
+
+                    if !rect_set.contains(&(width, height)) {
+                        rect_set.insert((width, height));
+                        rectangles.push(Rectangle {
+                            width,
+                            height,
+                            quantity: 1, // Start with 1, will add more below
+                        });
+                    }
+                }
+
+                // Distribute remaining rectangles randomly
+                let target_total = rng.random_range(MIN_TOTAL_RECTS..=MAX_TOTAL_RECTS);
+                let mut current_total: i32 = rectangles.len() as i32;
+
+                while current_total < target_total {
+                    let idx = rng.random_range(0..rectangles.len());
+                    let add = rng.random_range(1..=(target_total - current_total).min(5));
+                    rectangles[idx].quantity += add;
+                    current_total += add;
+                }
+
+                let total_rects: i32 = rectangles.iter().map(|r| r.quantity).sum();
+
+                let testcase = JsonInput {
+                    width_of_bin: bin_width,
+                    number_of_rectangles: total_rects as usize,
+                    number_of_types_of_rectangles: rectangles.len(),
+                    autofill_option: false,
+                    rectangle_list: rectangles,
+                };
+
+                let msg = format!(
+                    "✓ Generated: {} rectangles, {} types, bin width {}",
+                    testcase.number_of_rectangles,
+                    testcase.number_of_types_of_rectangles,
+                    testcase.width_of_bin
+                );
+
+                self.current_testcase = Some(testcase);
+                self.testcase_message = Some(msg);
             }
         }
     }

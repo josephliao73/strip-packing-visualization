@@ -1,73 +1,31 @@
-#!/usr/bin/env python3
-
-
-"""
-Runner for user-submitted Packing solutions.
-Executes the user's Packing class and outputs JSON results.
-
-Usage:
-    python python_runner.py <solution_file> <bin_width> <rectangles_json>
-
-Example:
-    python python_runner.py solution.py 100 '[[10,20,1],[15,25,2]]'
-"""
-
+import inspect
+import subprocess
 import sys
-import json
-import importlib.util
+import os 
 
+result = subprocess.run(["cat", sys.argv[1]], capture_output=True,text=True,check=True)
+dir_path = os.path.dirname(os.path.realpath(__file__))
+lib_path = os.path.join(dir_path, '..', 'runner_lib')
+sys.path.insert(0, lib_path)
+import packing_lib
 
-def load_solution(solution_path: str):
-    """Load the user's solution module and return the Packing class."""
-    spec = importlib.util.spec_from_file_location("solution", solution_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+ns = {"__name__": "__main__", "make_output": packing_lib.make_output}
+#ns = {"__name__": "__main__"}
+exec(result.stdout, ns)
 
-    if not hasattr(module, "Packing"):
-        raise AttributeError("Solution must contain a 'Packing' class")
+p = ns.get("Packing")
+if p is None or not inspect.isclass(p):
+    raise TypeError("Algorithm must define class named Packing")
 
-    return module.Packing
+s = getattr(p, "solve", None)
+if s is None or not callable(s):
+    raise TypeError("Class 'Packing' must define a callable method 'solve'")
 
+sig = inspect.signature(s)
+params = list(sig.parameters.values())
+if len(params) != 3:
+    raise TypeError("Packing must accept 3 params")
 
-def main():
-    if len(sys.argv) != 4:
-        print("Usage: python python_runner.py <solution_file> <bin_width> <rectangles_json>", file=sys.stderr)
-        sys.exit(1)
-
-    solution_path = sys.argv[1]
-    bin_width = int(sys.argv[2])
-    rectangles_raw = json.loads(sys.argv[3])
-
-    rectangles = [(r[0], r[1], r[2]) for r in rectangles_raw]
-
-    Packing = load_solution(solution_path)
-    packing = Packing()
-
-    result = packing.solve(bin_width, rectangles)
-
-    total_height = 0.0
-    placements = []
-
-    for placement in result:
-        x, y, w, h = placement
-        placements.append({
-            "x": float(x),
-            "y": float(y),
-            "width": int(w),
-            "height": int(h)
-        })
-        top = y + h
-        if top > total_height:
-            total_height = float(top)
-
-    output = {
-        "bin_width": bin_width,
-        "total_height": total_height,
-        "placements": placements
-    }
-
-    print(json.dumps(output))
-
-
-if __name__ == "__main__":
-    main()
+instance = p()
+out = instance.solve(1, [1])
+print(out)
