@@ -68,6 +68,8 @@ pub enum Input {
     SnapAndAdjustHeight,
     RightClickCanvas(Option<usize>),
     TabSelected(RightPanelTab),
+    AlgoTabSelected(u64),
+    RemoveAlgoTab(u64),
     CodeEditorAction(text_editor::Action),
     LanguageSelected(CodeLanguage),
     RunCode,
@@ -87,7 +89,13 @@ pub enum Input {
     // Area selection inputs
     AreaSelectStart(f32, f32),
     AreaSelectMove(f32, f32),
-    AreaSelectEnd(Vec<usize>),  // Contains indices of rectangles in the selection area
+    // (selected indices, bin_x, bin_y, bin_w, bin_h) - bin coordinates for the selection
+    AreaSelectEnd(Vec<usize>, f32, f32, f32, f32),
+    // Selection region context menu
+    ShowRegionContextMenu(usize, f32, f32),  // region index, x, y position
+    HideContextMenu,
+    RemoveSelectionRegion(usize),
+    RepackSelectionRegion(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]
@@ -105,6 +113,33 @@ pub struct AlgorithmOutput {
     pub placements: Vec<Placement>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AlgoTab {
+    pub id: u64,
+    pub name: String,
+    pub selected_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SelectionRegion {
+    pub id: u64,  // For color generation
+    // Stored in bin coordinates (logical units, not screen pixels)
+    pub bin_x: f32,
+    pub bin_y: f32,
+    pub bin_w: f32,
+    pub bin_h: f32,
+    pub selected_indices_start: usize,
+    pub selected_indices_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HitGrid {
+    pub cell_size: f32,
+    pub cols: usize,
+    pub rows: usize,
+    pub cells: Vec<Vec<usize>>,
+}
+
 pub struct PackingApp {
     pub w_input: String,
     pub n_input: String,
@@ -116,6 +151,10 @@ pub struct PackingApp {
     pub error_message: Option<String>,
     pub algorithm_output: Option<AlgorithmOutput>,
     pub output_revision: u64,
+    pub hit_grid: Option<HitGrid>,
+    pub algo_tabs: Vec<AlgoTab>,
+    pub active_algo_tab_id: u64,
+    pub next_algo_tab_id: u64,
     pub zoom: f32,
     pub visible_rects: usize,
     pub animating: bool,
@@ -147,6 +186,13 @@ pub struct PackingApp {
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
     pub is_area_selecting: bool,
+    // Persistent selection regions
+    pub selection_regions: Vec<SelectionRegion>,
+    pub selection_region_indices: Vec<usize>,  // Flat list of all selected indices for regions
+    pub next_region_id: u64,
+    pub context_menu_visible: bool,
+    pub context_menu_region: Option<usize>,
+    pub context_menu_position: (f32, f32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -164,6 +210,7 @@ pub struct ParseOutput {
 pub struct BinCanvas<'a>  {
     pub output: &'a AlgorithmOutput,
     pub output_revision: u64,
+    pub hit_grid: Option<&'a HitGrid>,
     pub zoom: f32,
     pub visible_count: usize,
     pub pan_x: f32,
@@ -179,4 +226,5 @@ pub struct BinCanvas<'a>  {
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
     pub settings: &'a Settings,
+    pub selection_regions: &'a [SelectionRegion],
 }

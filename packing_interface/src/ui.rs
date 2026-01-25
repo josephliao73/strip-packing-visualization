@@ -6,7 +6,7 @@ use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use std::fmt::format;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, Settings};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -24,6 +24,14 @@ impl Default for PackingApp {
             error_message: None,
             algorithm_output: None,
             output_revision: 0,
+            hit_grid: None,
+            algo_tabs: vec![AlgoTab {
+                id: 0,
+                name: "Root".to_string(),
+                selected_indices: Vec::new(),
+            }],
+            active_algo_tab_id: 0,
+            next_algo_tab_id: 1,
             zoom: 1.0,
             visible_rects: 0,
             animating: false,
@@ -75,6 +83,12 @@ class Packing:
             area_select_start: None,
             area_select_current: None,
             is_area_selecting: false,
+            selection_regions: Vec::new(),
+            selection_region_indices: Vec::new(),
+            next_region_id: 0,
+            context_menu_visible: false,
+            context_menu_region: None,
+            context_menu_position: (0.0, 0.0),
         }
     }
 }
@@ -157,6 +171,7 @@ impl PackingApp {
                                     self.animating = true;
                                     self.selected_rects.clear();
                                     self.output_revision = self.output_revision.wrapping_add(1);
+                                    self.rebuild_hit_grid();
                                     self.error_message = Some("✓ Successfully imported algorithm output".to_string());
                                 }
                                 Err(e) => {
@@ -223,6 +238,9 @@ impl PackingApp {
                 self.is_panning = true;
                 self.last_mouse_x = x;
                 self.last_mouse_y = y;
+                // Hide context menu when starting to pan
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
             }
             Input::PanMove(x, y) => {
                 if self.is_panning {
@@ -256,6 +274,7 @@ impl PackingApp {
                     self.dragged_rect_offset_y += dy;
                     self.last_mouse_x = x;
                     self.last_mouse_y = y;
+                    println!("HIIIII");
                 }
             }
             Input::RectangleDragEnd(is_inside, intersects, new_x, new_y) => {
@@ -292,10 +311,24 @@ impl PackingApp {
                     } else {
                         self.selected_rects.remove(&idx);
                     }
+                    if self.active_algo_tab_id != 0 {
+                        self.update_active_tab_selection_from_current();
+                    }
                 }
             }
             Input::TabSelected(tab) => {
                 self.active_tab = tab;
+            }
+            Input::AlgoTabSelected(tab_id) => {
+                self.set_active_algo_tab(tab_id);
+            }
+            Input::RemoveAlgoTab(tab_id) => {
+                if tab_id != 0 {
+                    self.algo_tabs.retain(|t| t.id != tab_id);
+                    if self.active_algo_tab_id == tab_id {
+                        self.set_active_algo_tab(0);
+                    }
+                }
             }
             Input::CodeEditorAction(action) => {
                 use iced::widget::text_editor::{Action, Edit};
@@ -387,6 +420,7 @@ impl PackingApp {
                             self.animating = true;
                             self.selected_rects.clear();
                             self.output_revision = self.output_revision.wrapping_add(1);
+                            self.rebuild_hit_grid();
                             self.active_tab = RightPanelTab::Visualization;
                             self.error_message = Some("✓ Code executed successfully".to_string());
                             self.code_output_json = Some(raw_json);
@@ -540,26 +574,202 @@ impl PackingApp {
                 self.is_area_selecting = true;
                 self.area_select_start = Some((x, y));
                 self.area_select_current = Some((x, y));
+                // Hide context menu when starting area selection
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
             }
             Input::AreaSelectMove(x, y) => {
                 if self.is_area_selecting {
                     self.area_select_current = Some((x, y));
                 }
             }
-            Input::AreaSelectEnd(selected_indices) => {
-                // Add all rectangles within the selection area to selected_rects
-                if let Some(output) = &self.algorithm_output {
-                    for idx in selected_indices {
-                        if idx < output.placements.len() {
-                            if !self.selected_rects.contains(&idx) {
-                                self.selected_rects.insert(idx);
+            Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h) => {
+                // Create a persistent selection region with bin coordinates
+                if !selected_indices.is_empty() && bin_w > 0.0 && bin_h > 0.0 {
+                    let mut final_x = bin_x;
+                    let mut final_y = bin_y;
+                    let mut can_create = true;
+
+                    // Check intersections and snap if overlap is small (≤20%)
+                    for existing in &self.selection_regions {
+                        let new_x1 = final_x;
+                        let new_y1 = final_y;
+                        let new_x2 = final_x + bin_w;
+                        let new_y2 = final_y + bin_h;
+
+                        let ex1 = existing.bin_x;
+                        let ey1 = existing.bin_y;
+                        let ex2 = existing.bin_x + existing.bin_w;
+                        let ey2 = existing.bin_y + existing.bin_h;
+
+                        // Check if they intersect
+                        if new_x1 < ex2 && new_x2 > ex1 && new_y1 < ey2 && new_y2 > ey1 {
+                            // Calculate overlap amounts in each direction
+                            let overlap_x = (new_x2.min(ex2) - new_x1.max(ex1)).max(0.0);
+                            let overlap_y = (new_y2.min(ey2) - new_y1.max(ey1)).max(0.0);
+
+                            // Calculate overlap as percentage of new region's dimension
+                            let overlap_x_pct = overlap_x / bin_w;
+                            let overlap_y_pct = overlap_y / bin_h;
+
+                            // If overlap is small enough (≤20% in either dimension), snap
+                            if overlap_x_pct <= 0.2 || overlap_y_pct <= 0.2 {
+                                // Find the smallest push distance to resolve the overlap
+                                // Four possible directions: push left, right, up, down
+                                let push_left = new_x2 - ex1;   // Push new region left
+                                let push_right = ex2 - new_x1;  // Push new region right
+                                let push_down = new_y2 - ey1;   // Push new region down (in bin coords, down = lower y)
+                                let push_up = ey2 - new_y1;     // Push new region up
+
+                                // Find minimum push that's positive (meaning it resolves overlap)
+                                let mut min_push = f32::MAX;
+                                let mut push_dir = 0; // 0=left, 1=right, 2=down, 3=up
+
+                                if push_left > 0.0 && push_left < min_push {
+                                    min_push = push_left;
+                                    push_dir = 0;
+                                }
+                                if push_right > 0.0 && push_right < min_push {
+                                    min_push = push_right;
+                                    push_dir = 1;
+                                }
+                                if push_down > 0.0 && push_down < min_push {
+                                    min_push = push_down;
+                                    push_dir = 2;
+                                }
+                                if push_up > 0.0 && push_up < min_push {
+                                    min_push = push_up;
+                                    push_dir = 3;
+                                }
+
+                                // Apply the snap
+                                match push_dir {
+                                    0 => final_x = ex1 - bin_w, // Snap to left of existing
+                                    1 => final_x = ex2,         // Snap to right of existing
+                                    2 => final_y = ey1 - bin_h, // Snap below existing
+                                    3 => final_y = ey2,         // Snap above existing
+                                    _ => {}
+                                }
+                            } else {
+                                // Overlap too large, reject
+                                can_create = false;
+                                break;
                             }
                         }
+                    }
+
+                    // After snapping, verify no remaining intersections
+                    if can_create {
+                        let final_x1 = final_x;
+                        let final_y1 = final_y;
+                        let final_x2 = final_x + bin_w;
+                        let final_y2 = final_y + bin_h;
+
+                        for existing in &self.selection_regions {
+                            let ex1 = existing.bin_x;
+                            let ey1 = existing.bin_y;
+                            let ex2 = existing.bin_x + existing.bin_w;
+                            let ey2 = existing.bin_y + existing.bin_h;
+
+                            if final_x1 < ex2 && final_x2 > ex1 && final_y1 < ey2 && final_y2 > ey1 {
+                                can_create = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if can_create {
+                        let region_id = self.next_region_id;
+                        self.next_region_id = self.next_region_id.wrapping_add(1);
+
+                        let region = SelectionRegion {
+                            id: region_id,
+                            bin_x: final_x,
+                            bin_y: final_y,
+                            bin_w,
+                            bin_h,
+                            selected_indices_start: self.selection_region_indices.len(),
+                            selected_indices_count: selected_indices.len(),
+                        };
+                        self.selection_regions.push(region);
+                        self.selection_region_indices.extend(selected_indices.iter().copied());
+
+                        // Add to selected_rects for visual feedback (but don't create tab yet)
+                        if let Some(output) = &self.algorithm_output {
+                            self.selected_rects.clear();
+                            for idx in &selected_indices {
+                                if *idx < output.placements.len() {
+                                    self.selected_rects.insert(*idx);
+                                }
+                            }
+                        }
+                        // Tab creation is deferred until user clicks "Repack Region" in context menu
                     }
                 }
                 self.is_area_selecting = false;
                 self.area_select_start = None;
                 self.area_select_current = None;
+            }
+            Input::ShowRegionContextMenu(region_idx, x, y) => {
+                self.context_menu_visible = true;
+                self.context_menu_region = Some(region_idx);
+                self.context_menu_position = (x, y);
+            }
+            Input::HideContextMenu => {
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
+            }
+            Input::RemoveSelectionRegion(region_idx) => {
+                if region_idx < self.selection_regions.len() {
+                    let region = self.selection_regions[region_idx];
+                    // Remove the indices for this region from the flat list
+                    let start = region.selected_indices_start;
+                    let end = start + region.selected_indices_count;
+                    self.selection_region_indices.drain(start..end);
+
+                    // Update indices for subsequent regions
+                    for r in &mut self.selection_regions[region_idx + 1..] {
+                        r.selected_indices_start -= region.selected_indices_count;
+                    }
+
+                    self.selection_regions.remove(region_idx);
+                }
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
+            }
+            Input::RepackSelectionRegion(region_idx) => {
+                if region_idx < self.selection_regions.len() {
+                    let region = &self.selection_regions[region_idx];
+                    let start = region.selected_indices_start;
+                    let count = region.selected_indices_count;
+                    let selected_indices: Vec<usize> = self.selection_region_indices[start..start + count].to_vec();
+
+                    // Generate tree-like name based on current active tab
+                    let current_tab_name = self.algo_tabs.iter()
+                        .find(|t| t.id == self.active_algo_tab_id)
+                        .map(|t| t.name.clone())
+                        .unwrap_or_else(|| "Root".to_string());
+
+                    // Count existing children of current tab to determine suffix
+                    let child_count = self.algo_tabs.iter()
+                        .filter(|t| t.name.starts_with(&format!("{}.", current_tab_name)))
+                        .count();
+
+                    let new_name = format!("{}.{}", current_tab_name, child_count + 1);
+
+                    let tab_id = self.next_algo_tab_id;
+                    self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+                    self.algo_tabs.push(AlgoTab {
+                        id: tab_id,
+                        name: new_name,
+                        selected_indices,
+                    });
+                    self.set_active_algo_tab(tab_id);
+
+                    // TODO: Actually run the repacking algorithm on the selected rectangles
+                }
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
             }
         }
     }
@@ -590,152 +800,360 @@ impl PackingApp {
         Subscription::batch(subscriptions)
     }
 
-    fn try_snap_rectangle(&self, rect_idx: usize, new_x: f32, new_y: f32, is_inside: bool, intersects: bool) -> Option<(f32, f32)> {
-        const SNAP_MARGIN_PERCENTAGE: f32 = 0.05;
-        const RECT_SNAP_THRESHOLD: f32 = 5.0; // Snap threshold in bin units for rectangle-to-rectangle snapping
+fn try_snap_rectangle(
+    &self,
+    rect_idx: usize,
+    new_x: f32,
+    new_y: f32,
+    _is_inside: bool,
+    _intersects: bool,
+) -> Option<(f32, f32)> {
+    const SNAP_MARGIN_PERCENTAGE: f32 = 0.05;
 
-        if let Some(output) = &self.algorithm_output {
-            if rect_idx >= output.placements.len() {
-                return None;
+    const EDGE_SNAP_THRESHOLD: f32 = 10.0; 
+    const VERTICAL_SNAP_THRESHOLD: f32 = 12.0;
+
+    let output = self.algorithm_output.as_ref()?;
+    if rect_idx >= output.placements.len() {
+        return None;
+    }
+
+    let p = &output.placements[rect_idx];
+    let rect_w = p.width as f32;
+    let rect_h = p.height as f32;
+
+    let bin_w = output.bin_width as f32;
+    let bin_h = output.total_height;
+
+    let snap_margin = rect_w.min(rect_h) * SNAP_MARGIN_PERCENTAGE;
+const OUT_OF_BOUNDS_TOLERANCE: f32 = 0.10;
+
+if !self.settings.snap_to_rectangles_enabled {
+    let tol_x = rect_w * OUT_OF_BOUNDS_TOLERANCE;
+    let tol_y = rect_h * OUT_OF_BOUNDS_TOLERANCE;
+
+    let dx_neg = (0.0 - new_x).max(0.0);
+    let dx_pos = ((new_x + rect_w) - bin_w).max(0.0);
+
+    let dy_neg = (0.0 - new_y).max(0.0);
+    let dy_pos = ((new_y + rect_h) - bin_h).max(0.0);
+
+    if dx_neg > tol_x || dx_pos > tol_x || dy_neg > tol_y || dy_pos > tol_y {
+        return None;
+    }
+
+    let x = new_x.clamp(0.0, bin_w - rect_w);
+    let y = new_y.clamp(0.0, bin_h - rect_h);
+
+    let intersects_any = |x: f32, y: f32| -> bool {
+        for (i, q) in output.placements.iter().enumerate() {
+            if i == rect_idx {
+                continue;
+            }
+            let ox = q.x.into_inner();
+            let oy = q.y.into_inner();
+            let ow = q.width as f32;
+            let oh = q.height as f32;
+
+            let overlap_x = x < ox + ow && x + rect_w > ox;
+            let overlap_y = y < oy + oh && y + rect_h > oy;
+
+            if overlap_x && overlap_y {
+                return true;
+            }
+        }
+        false
+    };
+
+    if intersects_any(x, y) {
+        return None;
+    }
+
+    return Some((x, y));
+}
+
+
+    let (sx, sy) = self.snap_to_rectangles(
+        rect_idx,
+        new_x,
+        new_y,
+        rect_w,
+        rect_h,
+        EDGE_SNAP_THRESHOLD.max(VERTICAL_SNAP_THRESHOLD) + snap_margin,
+    );
+
+    Some((sx, sy))
+}
+
+fn snap_to_rectangles(
+    &self,
+    rect_idx: usize,
+    new_x: f32,
+    new_y: f32,
+    rect_w: f32,
+    rect_h: f32,
+    threshold: f32,
+) -> (f32, f32) {
+    const HEIGHT_EPS: f32 = 1e-3;
+
+    let output = match &self.algorithm_output {
+        Some(o) => o,
+        None => return (new_x, new_y),
+    };
+
+    let bin_w = output.bin_width as f32;
+    let bin_h = output.total_height;
+
+    let other_max_top = output
+        .placements
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != rect_idx)
+        .map(|(_, q)| q.y.into_inner() + q.height as f32)
+        .fold(0.0_f32, f32::max);
+
+    let intersects_any = |x: f32, y: f32| -> bool {
+        for (i, q) in output.placements.iter().enumerate() {
+            if i == rect_idx {
+                continue;
+            }
+            let ox = q.x.into_inner();
+            let oy = q.y.into_inner();
+            let ow = q.width as f32;
+            let oh = q.height as f32;
+
+            let overlap_x = x < ox + ow && x + rect_w > ox;
+            let overlap_y = y < oy + oh && y + rect_h > oy;
+
+            if overlap_x && overlap_y {
+                return true;
+            }
+        }
+        false
+    };
+
+    let is_valid = |x: f32, y: f32| -> bool {
+        if x < 0.0 || x + rect_w > bin_w {
+            return false;
+        }
+        if y < 0.0 || y + rect_h > bin_h {
+            return false;
+        }
+        !intersects_any(x, y)
+    };
+
+    let drop_to_support = |x: f32, start_y: f32| -> f32 {
+        let mut support_y = 0.0_f32; // floor
+        for (i, q) in output.placements.iter().enumerate() {
+            if i == rect_idx {
+                continue;
+            }
+            let ox = q.x.into_inner();
+            let oy = q.y.into_inner();
+            let ow = q.width as f32;
+            let oh = q.height as f32;
+
+            let overlap_x = x < ox + ow && x + rect_w > ox;
+            if !overlap_x {
+                continue;
             }
 
-            let p = &output.placements[rect_idx];
-            let rect_width = p.width as f32;
-            let rect_height = p.height as f32;
-            let snap_margin = rect_width.min(rect_height) * SNAP_MARGIN_PERCENTAGE;
+            let top = oy + oh;
+            if top <= start_y + 1e-3 {
+                support_y = support_y.max(top);
+            }
+        }
+        support_y
+    };
 
-            let bin_width = output.bin_width as f32;
-            let bin_height = output.total_height as f32;
+    let nearest_side_gap = |x: f32, y: f32| -> (f32, f32, Option<f32>, Option<f32>) {
+        let y0 = y;
+        let y1 = y + rect_h;
 
-            let mut final_x = new_x;
-            let mut final_y = new_y;
+        let mut best_left_gap = x;
+        let mut best_left_snap_x = Some(0.0);
 
-            // If position is valid, check for rectangle snapping
-            if is_inside && !intersects {
-                // Try snapping to other rectangles if enabled
-                if self.settings.snap_to_rectangles_enabled {
-                    let (snapped_x, snapped_y) = self.snap_to_rectangles(rect_idx, new_x, new_y, rect_width, rect_height, RECT_SNAP_THRESHOLD);
-                    return Some((snapped_x, snapped_y));
-                }
-                return Some((new_x, new_y));
+        let mut best_right_gap = bin_w - (x + rect_w);
+        let mut best_right_snap_x = Some(bin_w - rect_w);
+
+        for (i, q) in output.placements.iter().enumerate() {
+            if i == rect_idx {
+                continue;
+            }
+            let ox = q.x.into_inner();
+            let oy = q.y.into_inner();
+            let ow = q.width as f32;
+            let oh = q.height as f32;
+
+            let overlap_y = y0 < oy + oh && y1 > oy;
+            if !overlap_y {
+                continue;
             }
 
-            // Try bin edge snapping
-            if !intersects && !is_inside {
-                let mut snapped = false;
+            let other_left = ox;
+            let other_right = ox + ow;
 
-                if new_x < 0.0 && new_x.abs() <= snap_margin {
-                    final_x = 0.0;
-                    snapped = true;
-                } else if new_x + rect_width > bin_width && (new_x + rect_width - bin_width) <= snap_margin {
-                    final_x = bin_width - rect_width;
-                    snapped = true;
-                }
-
-                if new_y < 0.0 && new_y.abs() <= snap_margin {
-                    final_y = 0.0;
-                    snapped = true;
-                } else if new_y + rect_height > bin_height && (new_y + rect_height - bin_height) <= snap_margin {
-                    final_y = bin_height - rect_height;
-                    snapped = true;
-                }
-
-                if snapped {
-                    return Some((final_x, final_y));
+            if other_right <= x + 1e-3 {
+                let gap = x - other_right;
+                if gap < best_left_gap {
+                    best_left_gap = gap;
+                    best_left_snap_x = Some(other_right);
                 }
             }
 
-            None
+            if other_left >= (x + rect_w) - 1e-3 {
+                let gap = other_left - (x + rect_w);
+                if gap < best_right_gap {
+                    best_right_gap = gap;
+                    best_right_snap_x = Some(other_left - rect_w);
+                }
+            }
+        }
+
+        (best_left_gap, best_right_gap, best_left_snap_x, best_right_snap_x)
+    };
+
+    let mut x_candidates: Vec<f32> = vec![new_x, 0.0, bin_w - rect_w];
+
+    for (i, q) in output.placements.iter().enumerate() {
+        if i == rect_idx {
+            continue;
+        }
+        let ox = q.x.into_inner();
+        let oy = q.y.into_inner();
+        let ow = q.width as f32;
+        let oh = q.height as f32;
+
+        let candidates = [
+            ox,          
+            ox + ow - rect_w,
+            ox + ow,        
+            ox - rect_w,   
+        ];
+
+        for &xc in &candidates {
+            if (xc - new_x).abs() <= threshold {
+                x_candidates.push(xc);
+            }
+        }
+
+        let _ = (oy, oh);
+    }
+
+    for xc in &mut x_candidates {
+        *xc = xc.clamp(0.0, bin_w - rect_w);
+    }
+    x_candidates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    x_candidates.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+
+    let mut y_starts: Vec<f32> = vec![new_y, 0.0];
+
+
+    for (i, q) in output.placements.iter().enumerate() {
+        if i == rect_idx {
+            continue;
+        }
+        let other_bottom = q.y.into_inner();
+        let other_top = other_bottom + q.height as f32;
+
+        let candidates = [
+            other_top,                 
+            other_bottom - rect_h,    
+            other_bottom,            
+            other_top - rect_h,     
+        ];
+
+        for &ys in &candidates {
+            if (ys - new_y).abs() <= threshold {
+                y_starts.push(ys);
+            }
+        }
+    }
+
+    for ys in &mut y_starts {
+        *ys = ys.clamp(0.0, bin_h - rect_h);
+    }
+    y_starts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    y_starts.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+
+    let mut best_height = f32::INFINITY;
+    let mut best_bucket: Vec<(f32, f32)> = Vec::new();
+
+    for &xc in &x_candidates {
+        for &ys in &y_starts {
+            let dropped = drop_to_support(xc, ys);
+            if !is_valid(xc, dropped) {
+                continue;
+            }
+
+            let resulting_height = other_max_top.max(dropped + rect_h);
+            if resulting_height + HEIGHT_EPS < best_height {
+                best_height = resulting_height;
+                best_bucket.clear();
+                best_bucket.push((xc, dropped));
+            } else if (resulting_height - best_height).abs() <= HEIGHT_EPS {
+                best_bucket.push((xc, dropped));
+            }
+        }
+
+        let dropped = drop_to_support(xc, new_y.clamp(0.0, bin_h - rect_h));
+        if is_valid(xc, dropped) {
+            let resulting_height = other_max_top.max(dropped + rect_h);
+            if resulting_height + HEIGHT_EPS < best_height {
+                best_height = resulting_height;
+                best_bucket.clear();
+                best_bucket.push((xc, dropped));
+            } else if (resulting_height - best_height).abs() <= HEIGHT_EPS {
+                best_bucket.push((xc, dropped));
+            }
+        }
+    }
+
+    if best_bucket.is_empty() {
+        let xc = new_x.clamp(0.0, bin_w - rect_w);
+        let dropped = drop_to_support(xc, new_y.clamp(0.0, bin_h - rect_h));
+        if is_valid(xc, dropped) {
+            return (xc, dropped);
+        }
+        return (new_x, new_y);
+    }
+
+    let mut best = best_bucket[0];
+    let mut best_score = (f32::INFINITY, f32::INFINITY); 
+
+    for &(xc, yc) in &best_bucket {
+        let (left_gap, right_gap, left_snap_x, right_snap_x) = nearest_side_gap(xc, yc);
+        let (_, preferred_snap_x) = if left_gap <= right_gap {
+            (left_gap, left_snap_x)
         } else {
-            None
-        }
-    }
+            (right_gap, right_snap_x)
+        };
 
-    fn snap_to_rectangles(&self, rect_idx: usize, new_x: f32, new_y: f32, rect_width: f32, rect_height: f32, threshold: f32) -> (f32, f32) {
-        let mut final_x = new_x;
-        let mut final_y = new_y;
-        let mut min_dist_x = threshold;
-        let mut min_dist_y = threshold;
-
-        if let Some(output) = &self.algorithm_output {
-            // Edges of the dragged rectangle
-            let left = new_x;
-            let right = new_x + rect_width;
-            let bottom = new_y;
-            let top = new_y + rect_height;
-
-            for (idx, other) in output.placements.iter().enumerate() {
-                if idx == rect_idx {
-                    continue;
-                }
-
-                let other_left = other.x.into_inner();
-                let other_right = other_left + other.width as f32;
-                let other_bottom = other.y.into_inner();
-                let other_top = other_bottom + other.height as f32;
-
-                // Check horizontal snapping (left edge to right edge, right edge to left edge, etc.)
-                // Snap left to other's right
-                let dist = (left - other_right).abs();
-                if dist < min_dist_x {
-                    min_dist_x = dist;
-                    final_x = other_right;
-                }
-
-                // Snap right to other's left
-                let dist = (right - other_left).abs();
-                if dist < min_dist_x {
-                    min_dist_x = dist;
-                    final_x = other_left - rect_width;
-                }
-
-                // Snap left to other's left (align)
-                let dist = (left - other_left).abs();
-                if dist < min_dist_x {
-                    min_dist_x = dist;
-                    final_x = other_left;
-                }
-
-                // Snap right to other's right (align)
-                let dist = (right - other_right).abs();
-                if dist < min_dist_x {
-                    min_dist_x = dist;
-                    final_x = other_right - rect_width;
-                }
-
-                // Check vertical snapping
-                // Snap bottom to other's top
-                let dist = (bottom - other_top).abs();
-                if dist < min_dist_y {
-                    min_dist_y = dist;
-                    final_y = other_top;
-                }
-
-                // Snap top to other's bottom
-                let dist = (top - other_bottom).abs();
-                if dist < min_dist_y {
-                    min_dist_y = dist;
-                    final_y = other_bottom - rect_height;
-                }
-
-                // Snap bottom to other's bottom (align)
-                let dist = (bottom - other_bottom).abs();
-                if dist < min_dist_y {
-                    min_dist_y = dist;
-                    final_y = other_bottom;
-                }
-
-                // Snap top to other's top (align)
-                let dist = (top - other_top).abs();
-                if dist < min_dist_y {
-                    min_dist_y = dist;
-                    final_y = other_top - rect_height;
-                }
+        let mut final_x = xc;
+        if let Some(snap_x) = preferred_snap_x {
+            let sx = snap_x.clamp(0.0, bin_w - rect_w);
+            if is_valid(sx, yc) {
+                final_x = sx;
             }
         }
 
-        (final_x, final_y)
+        let (lg2, rg2, _, _) = nearest_side_gap(final_x, yc);
+        let min_gap2 = lg2.min(rg2);
+
+        let dx = final_x - new_x;
+        let dy = yc - new_y;
+        let dist2 = dx * dx + dy * dy;
+
+        let score = (min_gap2, dist2);
+        if score < best_score {
+            best_score = score;
+            best = (final_x, yc);
+        }
     }
+    println!("{:?}", best);
+
+    best
+}
 
     fn recalculate_bin_height(&mut self) {
         if let Some(output) = &mut self.algorithm_output {
@@ -748,6 +1166,7 @@ impl PackingApp {
             }
             output.total_height = max_height.into_inner();
             self.output_revision = self.output_revision.wrapping_add(1);
+            self.rebuild_hit_grid();
         }
     }
 
@@ -763,6 +1182,72 @@ impl PackingApp {
 
         self.rect_total_lines = total_lines;
         self.rect_cursor_line = cursor_line;
+    }
+
+    fn rebuild_hit_grid(&mut self) {
+        use crate::types::HitGrid;
+
+        let Some(output) = &self.algorithm_output else {
+            self.hit_grid = None;
+            return;
+        };
+
+        let bin_w = output.bin_width.max(1) as f32;
+        let bin_h = output.total_height.max(1.0);
+        let cell_size = (bin_w.max(bin_h) / 40.0).clamp(5.0, 50.0);
+        let cols = (bin_w / cell_size).ceil().max(1.0) as usize;
+        let rows = (bin_h / cell_size).ceil().max(1.0) as usize;
+        let mut cells: Vec<Vec<usize>> = vec![Vec::new(); cols * rows];
+
+        for (idx, p) in output.placements.iter().enumerate() {
+            let x0 = p.x.into_inner().max(0.0);
+            let y0 = p.y.into_inner().max(0.0);
+            let x1 = (p.x.into_inner() + p.width as f32).min(bin_w);
+            let y1 = (p.y.into_inner() + p.height as f32).min(bin_h);
+
+            let min_col = (x0 / cell_size).floor() as usize;
+            let max_col = (x1 / cell_size).floor().min((cols - 1) as f32) as usize;
+            let min_row = (y0 / cell_size).floor() as usize;
+            let max_row = (y1 / cell_size).floor().min((rows - 1) as f32) as usize;
+
+            for row in min_row..=max_row {
+                let row_offset = row * cols;
+                for col in min_col..=max_col {
+                    cells[row_offset + col].push(idx);
+                }
+            }
+        }
+
+        self.hit_grid = Some(HitGrid {
+            cell_size,
+            cols,
+            rows,
+            cells,
+        });
+    }
+
+    fn set_active_algo_tab(&mut self, tab_id: u64) {
+        self.active_algo_tab_id = tab_id;
+        if tab_id == 0 {
+            self.selected_rects.clear();
+            return;
+        }
+        if let Some(tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
+            self.selected_rects.clear();
+            for idx in &tab.selected_indices {
+                self.selected_rects.insert(*idx);
+            }
+        }
+    }
+
+    fn update_active_tab_selection_from_current(&mut self) {
+        if self.active_algo_tab_id == 0 {
+            return;
+        }
+        if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+            tab.selected_indices = self.selected_rects.iter().copied().collect();
+            tab.selected_indices.sort_unstable();
+        }
     }
 
     fn parse_rectangles(&self) -> Result<ParseOutput, Vec<String>> {
@@ -1440,6 +1925,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
     let canvas = Canvas::new(BinCanvas {
             output,
             output_revision: self.output_revision,
+            hit_grid: self.hit_grid.as_ref(),
             zoom: self.zoom,
             visible_count: self.visible_rects,
             pan_x: self.pan_x,
@@ -1455,6 +1941,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             area_select_start: self.area_select_start,
             area_select_current: self.area_select_current,
             settings: &self.settings,
+            selection_regions: &self.selection_regions,
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -1529,6 +2016,85 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         })
     };
 
+    // Build context menu overlay if visible
+    let context_menu_overlay: Element<'_, Input> = if self.context_menu_visible {
+        if let Some(region_idx) = self.context_menu_region {
+            let remove_button = button(
+                container(
+                    text("Remove")
+                        .size(12)
+                        .font(ui_font)
+                )
+                .center_x(Length::Fill)
+            )
+            .on_press(Input::RemoveSelectionRegion(region_idx))
+            .padding([8, 16])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| {
+                let base_bg = Color::from_rgb(0.12, 0.12, 0.15);
+                let hover_bg = Color::from_rgb(0.18, 0.18, 0.22);
+                button::Style {
+                    background: Some(match status {
+                        button::Status::Hovered => hover_bg.into(),
+                        _ => base_bg.into(),
+                    }),
+                    text_color: Color::from_rgb(0.9, 0.9, 0.92),
+                    ..Default::default()
+                }
+            });
+
+            let repack_button = button(
+                container(
+                    text("Repack Region")
+                        .size(12)
+                        .font(ui_font)
+                )
+                .center_x(Length::Fill)
+            )
+            .on_press(Input::RepackSelectionRegion(region_idx))
+            .padding([8, 16])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| {
+                let base_bg = Color::from_rgb(0.12, 0.12, 0.15);
+                let hover_bg = Color::from_rgb(0.18, 0.18, 0.22);
+                button::Style {
+                    background: Some(match status {
+                        button::Status::Hovered => hover_bg.into(),
+                        _ => base_bg.into(),
+                    }),
+                    text_color: Color::from_rgb(0.9, 0.9, 0.92),
+                    ..Default::default()
+                }
+            });
+
+            container(
+                column![
+                    remove_button,
+                    repack_button,
+                ]
+                .spacing(2)
+                .width(120)
+            )
+            .padding(4)
+            .style(|_theme: &Theme| {
+                container::Style {
+                    background: Some(Color::from_rgb(0.1, 0.1, 0.13).into()),
+                    border: iced::Border {
+                        color: Color::from_rgb(0.3, 0.3, 0.35),
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
+        } else {
+            column![].into()
+        }
+    } else {
+        column![].into()
+    };
+
     column![
         container(
             iced::widget::stack![
@@ -1539,6 +2105,15 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                     .width(Length::Fill)
                     .padding(8)
                     .align_right(Length::Fill),
+                column![
+                    column![].height(Length::Fixed(self.context_menu_position.1)),
+                    row![
+                        column![].width(Length::Fixed(self.context_menu_position.0)),
+                        context_menu_overlay,
+                    ],
+                ]
+                .width(Length::Shrink)
+                .height(Length::Shrink),
             ]
         )
         .width(Length::Fill)
@@ -1824,6 +2399,87 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             }
         });
 
+        let algo_tab_bar = {
+            let tabs = self.algo_tabs.clone();
+            let active_id = self.active_algo_tab_id;
+            row(tabs.into_iter().map(|tab| {
+                let is_active = tab.id == active_id;
+                let is_root = tab.id == 0;
+
+                let tab_label = text(tab.name).size(11).font(ui_font);
+
+                // Close button for non-root tabs
+                let close_btn: Element<'_, Input> = if !is_root {
+                    button(text("×").size(10).font(ui_font))
+                        .on_press(Input::RemoveAlgoTab(tab.id))
+                        .padding([2, 4])
+                        .style(|_theme: &Theme, status| {
+                            button::Style {
+                                background: Some(match status {
+                                    button::Status::Hovered => Color::from_rgba(1.0, 0.4, 0.4, 0.4).into(),
+                                    _ => Color::TRANSPARENT.into(),
+                                }),
+                                border: iced::Border { radius: 3.0.into(), ..Default::default() },
+                                text_color: Color::from_rgb(0.6, 0.6, 0.65),
+                                ..Default::default()
+                            }
+                        })
+                        .into()
+                } else {
+                    container(text("")).width(0).into()
+                };
+
+                let tab_content = row![
+                    tab_label,
+                    close_btn,
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center);
+
+                let tab_btn: Element<'_, Input> = button(tab_content)
+                    .on_press(Input::AlgoTabSelected(tab.id))
+                    .padding([8, 12])
+                    .style(move |_theme: &Theme, status| {
+                        let (bg, border_color) = match status {
+                            button::Status::Hovered => if is_active {
+                                (Color::from_rgb(0.1, 0.1, 0.12), Color::from_rgb(0.18, 0.18, 0.22))
+                            } else {
+                                (Color::from_rgb(0.08, 0.08, 0.1), Color::from_rgb(0.14, 0.14, 0.18))
+                            },
+                            _ => if is_active {
+                                (Color::from_rgb(0.09, 0.09, 0.11), Color::from_rgb(0.16, 0.16, 0.2))
+                            } else {
+                                (Color::from_rgb(0.055, 0.055, 0.07), Color::from_rgb(0.1, 0.1, 0.13))
+                            },
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            border: iced::Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: iced::border::Radius {
+                                    top_left: 6.0,
+                                    top_right: 6.0,
+                                    bottom_left: 0.0,
+                                    bottom_right: 0.0,
+                                },
+                            },
+                            text_color: if is_active {
+                                Color::from_rgb(0.92, 0.92, 0.94)
+                            } else {
+                                Color::from_rgb(0.55, 0.55, 0.6)
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .into();
+
+                tab_btn
+            }))
+            .spacing(1)
+            .align_y(Alignment::End)
+        };
+
         let tab_bar = container(
             row![
                 viz_tab,
@@ -1880,6 +2536,25 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         };
 
         let right_panel = column![
+            container(algo_tab_bar)
+                .width(Length::Fill)
+                .padding([0, 6])
+                .style(|_theme: &Theme| {
+                    container::Style {
+                        background: Some(Color::from_rgb(0.04, 0.04, 0.05).into()),
+                        border: iced::Border {
+                            color: Color::from_rgb(0.1, 0.1, 0.12),
+                            width: 1.0,
+                            radius: iced::border::Radius {
+                                top_left: 8.0,
+                                top_right: 8.0,
+                                bottom_left: 0.0,
+                                bottom_right: 0.0,
+                            },
+                        },
+                        ..Default::default()
+                    }
+                }),
             tab_bar,
             container(right_panel_content)
                 .width(Length::Fill)
