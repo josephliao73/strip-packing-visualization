@@ -1,5 +1,5 @@
 use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, ParseOutput, Rectangle};
-use std::{env::current_dir, path::PathBuf};
+use std::{path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum RunResult {
@@ -44,7 +44,6 @@ impl LanguageRunner for PythonRunner {
             }
         };
 
-        // Write user code to temp file
         let temp_dir = std::env::temp_dir();
         println!("TEMP DIR: {:?}", temp_dir);
         let solution_path = temp_dir.join("./sol.py");
@@ -208,7 +207,6 @@ impl LanguageRunner for CppRunner {
         let source_path = temp_dir.join("packing_solution.cpp");
         let binary_path = temp_dir.join("packing_solution_cpp");
 
-        // Combine template + user code + main
         let full_code = format!("{}\n{}\n{}", Self::get_template(), code, Self::get_main_code());
 
         if let Err(e) = std::fs::write(&source_path, &full_code) {
@@ -217,7 +215,6 @@ impl LanguageRunner for CppRunner {
             };
         }
 
-        // Compile with g++ -std=c++17
         let compile_output = std::process::Command::new("g++")
             .arg("-std=c++17")
             .arg("-O2")
@@ -242,7 +239,6 @@ impl LanguageRunner for CppRunner {
             }
         }
 
-        // Run the compiled binary
         let run_output = std::process::Command::new(&binary_path)
             .arg(bin_width.to_string())
             .arg(&rectangles_str)
@@ -369,7 +365,6 @@ impl LanguageRunner for JavaRunner {
             };
         }
 
-        // Write user's Packing.java
         let packing_path = java_dir.join("Packing.java");
         if let Err(e) = std::fs::write(&packing_path, code) {
             return RunResult::Error {
@@ -377,7 +372,6 @@ impl LanguageRunner for JavaRunner {
             };
         }
 
-        // Write PackingRunner.java
         let runner_path = java_dir.join("PackingRunner.java");
         if let Err(e) = std::fs::write(&runner_path, Self::get_runner_code()) {
             return RunResult::Error {
@@ -385,7 +379,6 @@ impl LanguageRunner for JavaRunner {
             };
         }
 
-        // Compile both Java files
         let compile_output = std::process::Command::new("javac")
             .current_dir(&java_dir)
             .arg("Packing.java")
@@ -408,7 +401,6 @@ impl LanguageRunner for JavaRunner {
             }
         }
 
-        // Run the Java program
         let run_output = std::process::Command::new("java")
             .current_dir(&java_dir)
             .arg("PackingRunner")

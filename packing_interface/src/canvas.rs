@@ -271,18 +271,17 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
             }
         }
 
-        if let Some(hovered_idx) = self.hovered_rect {
-            if hovered_idx < count && self.dragged_rect != Some(hovered_idx) && !self.selected_rects.contains(&hovered_idx) {
-                let p = &self.output.placements[hovered_idx];
-                let w = p.width as f32 * scale;
-                let h = p.height as f32 * scale;
-                let x_px = origin_x + p.x.into_inner() * scale;
-                let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
-                if x_px + w >= 0.0 && x_px <= bounds.width && y_px + h >= 0.0 && y_px <= bounds.height {
-                    let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
-                    frame.stroke(&rect_path, stroke_hovered.clone());
-                }
+        if let Some(hovered_idx) = self.hovered_rect && hovered_idx < count && self.dragged_rect != Some(hovered_idx) && !self.selected_rects.contains(&hovered_idx) {
+            let p = &self.output.placements[hovered_idx];
+            let w = p.width as f32 * scale;
+            let h = p.height as f32 * scale;
+            let x_px = origin_x + p.x.into_inner() * scale;
+            let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
+            if x_px + w >= 0.0 && x_px <= bounds.width && y_px + h >= 0.0 && y_px <= bounds.height {
+                let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
+                frame.stroke(&rect_path, stroke_hovered.clone());
             }
+        
         }
 
         if let Some(dragged_idx) = self.dragged_rect && dragged_idx < count {
@@ -347,7 +346,6 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     };
                     frame.stroke(&rect_path, Stroke::default().with_color(stroke_color).with_width(2.0));
 
-                    // Draw snap preview if available (calculated by ui.rs using the actual snap logic)
                     if let Some((snap_x, snap_y)) = self.snap_preview {
                         let rect_h = p.height as f32;
                         let preview_x = origin_x + snap_x * scale;
@@ -367,9 +365,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
             }
 
-        // Draw persistent selection regions with unique colors, scaled with zoom/pan
         for region in self.selection_regions.iter() {
-            // Convert bin coordinates to screen coordinates
             let sel_x = origin_x + region.bin_x * scale;
             let sel_y = origin_y + (bin_h_units - region.bin_y - region.bin_h) * scale;
             let sel_w = region.bin_w * scale;
@@ -377,13 +373,11 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
             let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
 
-            // Generate unique color based on region id
-            let (fill_color, stroke_color) = region_color_from_id(region.id);
+            let (fill_color, stroke_color) = region_color(region.is_inherited);
             frame.fill(&sel_path, Fill::from(fill_color));
             frame.stroke(&sel_path, Stroke::default().with_color(stroke_color).with_width(1.5));
         }
 
-        // Draw area selection rectangle (temporary, while dragging)
         if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((current_x, current_y)) = self.area_select_current {
             let local_start_x = start_x - bounds.x;
             let local_start_y = start_y - bounds.y;
@@ -433,9 +427,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
                 if let Some(position) = cursor.position() {
-                    // First check if clicking on a persistent selection region
                     if let Some(region_idx) = self.find_region_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_h_units) {
-                        // Show context menu for this region - use coordinates relative to canvas bounds
                         let local_x = position.x - bounds.x;
                         let local_y = position.y - bounds.y;
                         (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, local_x, local_y)))
@@ -459,19 +451,16 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         &bounds, scale, origin_x, origin_y, bin_h_units
                     );
 
-                    // Convert screen coordinates to bin coordinates
                     let local_start_x = start_x - bounds.x;
                     let local_start_y = start_y - bounds.y;
                     let local_end_x = end_x - bounds.x;
                     let local_end_y = end_y - bounds.y;
 
-                    // Convert to bin coordinates (note: y is flipped)
                     let bin_x1 = (local_start_x - origin_x) / scale;
                     let bin_y1 = bin_h_units - (local_start_y - origin_y) / scale;
                     let bin_x2 = (local_end_x - origin_x) / scale;
                     let bin_y2 = bin_h_units - (local_end_y - origin_y) / scale;
 
-                    // Normalize to get min corner and dimensions
                     let bin_x = bin_x1.min(bin_x2);
                     let bin_y = bin_y1.min(bin_y2);
                     let bin_w = (bin_x2 - bin_x1).abs();
@@ -613,14 +602,11 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 } else if self.is_panning {
                     (canvas::event::Status::Captured, Some(Input::PanMove(position.x, position.y)))
                 } else if self.dragged_rect.is_some() {
-                    // Send scale so ui.rs can calculate bin coords after updating offsets
                     (canvas::event::Status::Captured, Some(Input::RectangleDragMove(position.x, position.y, scale)))
                 } else {
                     let now = Instant::now();
-                    if let Some(last) = state.last_hover_time {
-                        if now.duration_since(last) < Duration::from_millis(12) {
-                            return (canvas::event::Status::Ignored, None);
-                        }
+                    if let Some(last) = state.last_hover_time && now.duration_since(last) < Duration::from_millis(12) {
+                        return (canvas::event::Status::Ignored, None);
                     }
                     state.last_hover_time = Some(now);
                     let hovered = self.find_rectangle_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_w_units, bin_h_units);
@@ -643,14 +629,11 @@ fn color_from_dimensions(x: i32, y: i32) -> Color {
         h = h.wrapping_mul(1099511628211);
     }
 
-    // Generate hue from hash (0-360)
     let hue = ((h & 0xFFFF) as f32 / 65535.0) * 360.0;
 
-    // Use softer saturation and higher lightness for pastel colors
     let saturation = 0.55 + ((h >> 16) & 0xFF) as f32 / 255.0 * 0.25; // 0.55-0.80
     let lightness = 0.55 + ((h >> 24) & 0xFF) as f32 / 255.0 * 0.20;  // 0.55-0.75
 
-    // HSL to RGB conversion
     let c = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
     let x_val = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
     let m = lightness - c / 2.0;
@@ -672,39 +655,16 @@ fn color_from_dimensions(x: i32, y: i32) -> Color {
     Color::from_rgb(r + m, g + m, b + m)
 }
 
-/// Generate a unique color pair (fill, stroke) for a selection region based on its id
-fn region_color_from_id(id: u64) -> (Color, Color) {
-    // Use golden ratio for well-distributed hues
-    let golden_ratio: f32 = 0.618033988749895;
-    let hue: f32 = ((id as f32 * golden_ratio) % 1.0) * 360.0;
-
-    // HSL to RGB for stroke color (more saturated, darker)
-    let saturation: f32 = 0.65;
-    let lightness: f32 = 0.55;
-
-    let c: f32 = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
-    let x_val: f32 = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
-    let m: f32 = lightness - c / 2.0;
-
-    let (r, g, b): (f32, f32, f32) = if hue < 60.0 {
-        (c, x_val, 0.0)
-    } else if hue < 120.0 {
-        (x_val, c, 0.0)
-    } else if hue < 180.0 {
-        (0.0, c, x_val)
-    } else if hue < 240.0 {
-        (0.0, x_val, c)
-    } else if hue < 300.0 {
-        (x_val, 0.0, c)
+fn region_color(is_inherited: bool) -> (Color, Color) {
+    if is_inherited {
+        let stroke = Color::from_rgb(0.3, 0.5, 0.9);
+        let fill = Color::from_rgba(0.3, 0.5, 0.9, 0.15);
+        (fill, stroke)
     } else {
-        (c, 0.0, x_val)
-    };
-
-    let stroke = Color::from_rgb(r + m, g + m, b + m);
-    // Fill is same hue but much more transparent
-    let fill = Color::from_rgba(r + m, g + m, b + m, 0.15);
-
-    (fill, stroke)
+        let stroke = Color::from_rgb(0.95, 0.6, 0.2);
+        let fill = Color::from_rgba(0.95, 0.6, 0.2, 0.15);
+        (fill, stroke)
+    }
 }
 
 fn is_inside(bin_rect: &iced::Rectangle, x:f32, y:f32, w:f32, h:f32) -> bool {

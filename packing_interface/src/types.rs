@@ -114,22 +114,24 @@ pub struct AlgorithmOutput {
 }
 
 #[derive(Debug, Clone)]
-pub struct AlgoTab {
-    pub id: u64,
-    pub name: String,
-    pub selected_indices: Vec<usize>,
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct SelectionRegion {
-    pub id: u64,  // For color generation
+    pub is_inherited: bool,  // true = inherited from parent tab, false = newly created
     // Stored in bin coordinates (logical units, not screen pixels)
     pub bin_x: f32,
     pub bin_y: f32,
     pub bin_w: f32,
     pub bin_h: f32,
-    pub selected_indices_start: usize,
-    pub selected_indices_count: usize,
+    pub selected_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlgoTab {
+    pub id: u64,
+    pub name: String,
+    pub selected_indices: Vec<usize>,
+    // Each tab has its own selection regions
+    // Root: max 1 region, Others: max 2 (1 inherited + 1 new)
+    pub selection_regions: Vec<SelectionRegion>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,10 +190,7 @@ pub struct PackingApp {
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
     pub is_area_selecting: bool,
-    // Persistent selection regions
-    pub selection_regions: Vec<SelectionRegion>,
-    pub selection_region_indices: Vec<usize>, 
-    pub next_region_id: u64,
+    // Context menu for selection regions (regions are now stored per-tab in AlgoTab)
     pub context_menu_visible: bool,
     pub context_menu_region: Option<usize>,
     pub context_menu_position: (f32, f32),

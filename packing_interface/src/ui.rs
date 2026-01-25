@@ -28,6 +28,7 @@ impl Default for PackingApp {
                 id: 0,
                 name: "Root".to_string(),
                 selected_indices: Vec::new(),
+                selection_regions: Vec::new(),
             }],
             active_algo_tab_id: 0,
             next_algo_tab_id: 1,
@@ -85,9 +86,6 @@ class Packing:
             area_select_start: None,
             area_select_current: None,
             is_area_selecting: false,
-            selection_regions: Vec::new(),
-            selection_region_indices: Vec::new(),
-            next_region_id: 0,
             context_menu_visible: false,
             context_menu_region: None,
             context_menu_position: (0.0, 0.0),
@@ -121,7 +119,6 @@ impl PackingApp {
                             if file_path.extension().map_or(false, |ext| ext == "json") {
                                 match serde_json::from_str::<JsonInput>(&contents) {
                                     Ok(json_input) => {
-                                        // Populate form fields from JSON
                                         self.w_input = json_input.width_of_bin.to_string();
                                         self.n_input = json_input.number_of_rectangles.to_string();
                                         self.k_input = json_input.number_of_types_of_rectangles.to_string();
@@ -137,7 +134,7 @@ impl PackingApp {
                                         self.rectangle_data = text_editor::Content::with_text(&rect_text);
                                         self.update_rectangle_line_info();
                                         self.error_message = Some(format!(
-                                            "✓ Imported JSON: {} rectangle types, bin width {}",
+                                            "Imported JSON: {} rectangle types, bin width {}",
                                             json_input.rectangle_list.len(),
                                             json_input.width_of_bin
                                         ));
@@ -147,7 +144,6 @@ impl PackingApp {
                                     }
                                 }
                             } else {
-                                // Handle text files as before
                                 self.rectangle_data = text_editor::Content::with_text(&contents);
                                 self.update_rectangle_line_info();
                                 self.error_message = None;
@@ -278,7 +274,6 @@ impl PackingApp {
                     self.last_mouse_x = x;
                     self.last_mouse_y = y;
 
-                    // Calculate bin coords from the UPDATED offsets
                     if self.settings.snap_to_rectangles_enabled {
                         if let Some(output) = &self.algorithm_output {
                             if dragged_idx < output.placements.len() {
@@ -367,7 +362,7 @@ impl PackingApp {
 
                             let trimmed = current_line.trim_end();
                             let extra_indent = if trimmed.ends_with(':') {
-                                "    " // 4 spaces
+                                "    "
                             } else {
                                 ""
                             };
@@ -457,26 +452,24 @@ impl PackingApp {
                 self.bottom_panel_visible = !self.bottom_panel_visible;
             }
             Input::SaveOutputToFile => {
-                if let Some(json) = &self.code_output_json {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("JSON file", &["json"])
-                        .set_file_name("algorithm_output.json")
-                        .save_file()
-                    {
-                        match std::fs::write(&path, json) {
-                            Ok(_) => {
-                                self.error_message = Some(format!("✓ Output saved to {}", path.display()));
-                            }
-                            Err(e) => {
-                                self.error_message = Some(format!("Failed to save file: {}", e));
-                            }
+                if let Some(json) = &self.code_output_json && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("JSON file", &["json"])
+                    .set_file_name("algorithm_output.json")
+                    .save_file()
+                {
+                    match std::fs::write(&path, json) {
+                        Ok(_) => {
+                            self.error_message = Some(format!("✓ Output saved to {}", path.display()));
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to save file: {}", e));
                         }
                     }
                 }
+            
             }
             Input::InsertTab => {
                 use iced::widget::text_editor::{Action, Edit};
-                // Insert 4 spaces (tab-width) into the code editor
                 for _ in 0..4 {
                     self.code_editor_content.perform(Action::Edit(Edit::Insert(' ')));
                 }
@@ -507,7 +500,6 @@ impl PackingApp {
             Input::GenerateTestCase => {
                 let mut rng = rand::rng();
 
-                // Constants for random generation
                 const MIN_BIN_WIDTH: i32 = 5;
                 const MAX_BIN_WIDTH: i32 = 20;
                 const MIN_HEIGHT: i32 = 1;
@@ -559,7 +551,7 @@ impl PackingApp {
                 };
 
                 let msg = format!(
-                    "✓ Generated: {} rectangles, {} types, bin width {}",
+                    "Generated: {} rectangles, {} types, bin width {}",
                     testcase.number_of_rectangles,
                     testcase.number_of_types_of_rectangles,
                     testcase.width_of_bin
@@ -590,109 +582,116 @@ impl PackingApp {
                 }
             }
             Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h) => {
-               let mut can_create: bool = self.new_area_select; 
-                if bin_w > 0.0 && bin_h > 0.0 {
-                    let mut final_x = bin_x;
-                    let mut final_y = bin_y;
+                let current_tab_idx = self.algo_tabs.iter().position(|t| t.id == self.active_algo_tab_id);
 
-                    for existing in &self.selection_regions {
-                        let new_x1 = final_x;
-                        let new_y1 = final_y;
-                        let new_x2 = final_x + bin_w;
-                        let new_y2 = final_y + bin_h;
+                if let Some(tab_idx) = current_tab_idx {
+                    let is_root = self.active_algo_tab_id == 0;
+                    let max_regions = if is_root { 1 } else { 2 };
 
-                        let ex1 = existing.bin_x;
-                        let ey1 = existing.bin_y;
-                        let ex2 = existing.bin_x + existing.bin_w;
-                        let ey2 = existing.bin_y + existing.bin_h;
+                    let current_new_regions = self.algo_tabs[tab_idx].selection_regions.iter()
+                        .filter(|r| !r.is_inherited)
+                        .count();
 
-                        if new_x1 < ex2 && new_x2 > ex1 && new_y1 < ey2 && new_y2 > ey1 {
-                            let overlap_x = (new_x2.min(ex2) - new_x1.max(ex1)).max(0.0);
-                            let overlap_y = (new_y2.min(ey2) - new_y1.max(ey1)).max(0.0);
-
-                            let overlap_x_pct = overlap_x / bin_w;
-                            let overlap_y_pct = overlap_y / bin_h;
-
-                            if overlap_x_pct <= 0.2 || overlap_y_pct <= 0.2 {
-                                let push_left = new_x2 - ex1;
-                                let push_right = ex2 - new_x1;
-                                let push_down = new_y2 - ey1;
-                                let push_up = ey2 - new_y1;
-
-                                let mut min_push = f32::MAX;
-                                let mut push_dir = 0;
-
-                                if push_left > 0.0 && push_left < min_push {
-                                    min_push = push_left;
-                                    push_dir = 0;
-                                }
-                                if push_right > 0.0 && push_right < min_push {
-                                    min_push = push_right;
-                                    push_dir = 1;
-                                }
-                                if push_down > 0.0 && push_down < min_push {
-                                    min_push = push_down;
-                                    push_dir = 2;
-                                }
-                                if push_up > 0.0 && push_up < min_push {
-                                    min_push = push_up;
-                                    push_dir = 3;
-                                }
-
-                                match push_dir {
-                                    0 => final_x = ex1 - bin_w,
-                                    1 => final_x = ex2,
-                                    2 => final_y = ey1 - bin_h,
-                                    3 => final_y = ey2,
-                                    _ => {}
-                                }
-                            } else {
-                                can_create = false;
-                                break;
-                            }
-                        }
-                    }
+                    let can_create = self.new_area_select && bin_w > 0.0 && bin_h > 0.0 && current_new_regions < max_regions;
 
                     if can_create {
-                        let final_x1 = final_x;
-                        let final_y1 = final_y;
-                        let final_x2 = final_x + bin_w;
-                        let final_y2 = final_y + bin_h;
+                        let mut final_x = bin_x;
+                        let mut final_y = bin_y;
+                        let mut valid = true;
 
-                        for existing in &self.selection_regions {
+                        for existing in &self.algo_tabs[tab_idx].selection_regions {
+                            let new_x1 = final_x;
+                            let new_y1 = final_y;
+                            let new_x2 = final_x + bin_w;
+                            let new_y2 = final_y + bin_h;
+
                             let ex1 = existing.bin_x;
                             let ey1 = existing.bin_y;
                             let ex2 = existing.bin_x + existing.bin_w;
                             let ey2 = existing.bin_y + existing.bin_h;
 
-                            if final_x1 < ex2 && final_x2 > ex1 && final_y1 < ey2 && final_y2 > ey1 {
-                                can_create = false;
-                                break;
+                            if new_x1 < ex2 && new_x2 > ex1 && new_y1 < ey2 && new_y2 > ey1 {
+                                let overlap_x = (new_x2.min(ex2) - new_x1.max(ex1)).max(0.0);
+                                let overlap_y = (new_y2.min(ey2) - new_y1.max(ey1)).max(0.0);
+
+                                let overlap_x_pct = overlap_x / bin_w;
+                                let overlap_y_pct = overlap_y / bin_h;
+
+                                if overlap_x_pct <= 0.2 || overlap_y_pct <= 0.2 {
+                                    let push_left = new_x2 - ex1;
+                                    let push_right = ex2 - new_x1;
+                                    let push_down = new_y2 - ey1;
+                                    let push_up = ey2 - new_y1;
+
+                                    let mut min_push = f32::MAX;
+                                    let mut push_dir = 0;
+
+                                    if push_left > 0.0 && push_left < min_push {
+                                        min_push = push_left;
+                                        push_dir = 0;
+                                    }
+                                    if push_right > 0.0 && push_right < min_push {
+                                        min_push = push_right;
+                                        push_dir = 1;
+                                    }
+                                    if push_down > 0.0 && push_down < min_push {
+                                        min_push = push_down;
+                                        push_dir = 2;
+                                    }
+                                    if push_up > 0.0 && push_up < min_push {
+                                        push_dir = 3;
+                                    }
+
+                                    match push_dir {
+                                        0 => final_x = ex1 - bin_w,
+                                        1 => final_x = ex2,
+                                        2 => final_y = ey1 - bin_h,
+                                        3 => final_y = ey2,
+                                        _ => {}
+                                    }
+                                } else {
+                                    valid = false;
+                                    break;
+                                }
                             }
                         }
-                    }
 
-                    if can_create {
-                        let region_id = self.next_region_id;
-                        self.next_region_id = self.next_region_id.wrapping_add(1);
+                        if valid {
+                            let final_x1 = final_x;
+                            let final_y1 = final_y;
+                            let final_x2 = final_x + bin_w;
+                            let final_y2 = final_y + bin_h;
 
-                        let region = SelectionRegion {
-                            id: region_id,
-                            bin_x: final_x,
-                            bin_y: final_y,
-                            bin_w,
-                            bin_h,
-                            selected_indices_start: self.selection_region_indices.len(),
-                            selected_indices_count: selected_indices.len(),
-                        };
-                        self.selection_regions.push(region);
-                        self.selection_region_indices.extend(selected_indices.iter().copied());
+                            for existing in &self.algo_tabs[tab_idx].selection_regions {
+                                let ex1 = existing.bin_x;
+                                let ey1 = existing.bin_y;
+                                let ex2 = existing.bin_x + existing.bin_w;
+                                let ey2 = existing.bin_y + existing.bin_h;
 
-                        if let Some(output) = &self.algorithm_output {
-                            self.selected_rects.clear();
-                            for idx in &selected_indices {
-                                if *idx < output.placements.len() {
-                                    self.selected_rects.insert(*idx);
+                                if final_x1 < ex2 && final_x2 > ex1 && final_y1 < ey2 && final_y2 > ey1 {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if valid {
+                            let region = SelectionRegion {
+                                is_inherited: false,
+                                bin_x: final_x,
+                                bin_y: final_y,
+                                bin_w,
+                                bin_h,
+                                selected_indices: selected_indices.clone(),
+                            };
+                            self.algo_tabs[tab_idx].selection_regions.push(region);
+
+                            if let Some(output) = &self.algorithm_output {
+                                self.selected_rects.clear();
+                                for idx in &selected_indices {
+                                    if *idx < output.placements.len() {
+                                        self.selected_rects.insert(*idx);
+                                    }
                                 }
                             }
                         }
@@ -713,53 +712,73 @@ impl PackingApp {
                 self.context_menu_region = None;
             }
             Input::RemoveSelectionRegion(region_idx) => {
-                if region_idx < self.selection_regions.len() {
-                    let region = self.selection_regions[region_idx];
-                    let start = region.selected_indices_start;
-                    let end = start + region.selected_indices_count;
-                    self.selection_region_indices.drain(start..end);
-
-                    for r in &mut self.selection_regions[region_idx + 1..] {
-                        r.selected_indices_start -= region.selected_indices_count;
-                    }
-
-                    self.selection_regions.remove(region_idx);
+                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) && region_idx < tab.selection_regions.len() {
+                    tab.selection_regions.remove(region_idx);
+                
                 }
                 self.new_area_select = true;
                 self.context_menu_visible = false;
                 self.context_menu_region = None;
             }
             Input::RepackSelectionRegion(region_idx) => {
-                if region_idx < self.selection_regions.len() {
-                    let region = &self.selection_regions[region_idx];
-                    let start = region.selected_indices_start;
-                    let count = region.selected_indices_count;
-                    let selected_indices: Vec<usize> = self.selection_region_indices[start..start + count].to_vec();
+                let current_tab_idx = self.algo_tabs.iter().position(|t| t.id == self.active_algo_tab_id);
 
-                    // Generate tree-like name based on current active tab
-                    let current_tab_name = self.algo_tabs.iter()
-                        .find(|t| t.id == self.active_algo_tab_id)
-                        .map(|t| t.name.clone())
-                        .unwrap_or_else(|| "Root".to_string());
+                if let Some(tab_idx) = current_tab_idx && region_idx < self.algo_tabs[tab_idx].selection_regions.len() {
+                    let region = self.algo_tabs[tab_idx].selection_regions[region_idx].clone();
 
-                    // Count existing children of current tab to determine suffix
+                    if region.is_inherited {
+                        self.context_menu_visible = false;
+                        self.context_menu_region = None;
+                        return;
+                    }
+
+                    let current_tab_name = &self.algo_tabs[tab_idx].name;
+                    let is_root = current_tab_name == "Root";
+
+                    let prefix = if is_root {
+                        "Node ".to_string()
+                    } else {
+                        format!("{}-", current_tab_name)
+                    };
+
                     let child_count = self.algo_tabs.iter()
-                        .filter(|t| t.name.starts_with(&format!("{}.", current_tab_name)))
+                        .filter(|t| {
+                            if is_root {
+                                t.name.starts_with("Node ") && !t.name.contains('-')
+                            } else {
+                                t.name.starts_with(&prefix) &&
+                                t.name[prefix.len()..].chars().all(|c| c.is_ascii_digit())
+                            }
+                        })
                         .count();
 
-                    let new_name = format!("{}.{}", current_tab_name, child_count + 1);
+                    let new_name = format!("{}{}", prefix, child_count + 1);
 
                     let tab_id = self.next_algo_tab_id;
                     self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+
+                    let inherited_region = SelectionRegion {
+                        is_inherited: true,
+                        bin_x: region.bin_x,
+                        bin_y: region.bin_y,
+                        bin_w: region.bin_w,
+                        bin_h: region.bin_h,
+                        selected_indices: region.selected_indices.clone(),
+                    };
+
                     self.algo_tabs.push(AlgoTab {
                         id: tab_id,
                         name: new_name,
-                        selected_indices,
+                        selected_indices: region.selected_indices.clone(),
+                        selection_regions: vec![inherited_region],
                     });
-                    self.set_active_algo_tab(tab_id);
 
-                    // TODO: Actually run the repacking algorithm on the selected rectangles
+                    self.algo_tabs[tab_idx].selection_regions.remove(region_idx);
+
+                    self.set_active_algo_tab(tab_id);
+                
                 }
+                self.new_area_select = true;
                 self.context_menu_visible = false;
                 self.context_menu_region = None;
             }
@@ -1766,7 +1785,6 @@ fn snap_to_rectangles(
                 }
             });
 
-// Settings gear button (always visible)
         let settings_panel_visible = self.settings_panel_visible;
         let gear_button = button(
             container(
@@ -1853,7 +1871,6 @@ fn snap_to_rectangles(
             }
         });
 
-        // Settings popup panel
         let area_select_enabled = self.settings.area_select_enabled;
         let snap_to_rects_enabled = self.settings.snap_to_rectangles_enabled;
 
@@ -1901,7 +1918,6 @@ fn snap_to_rectangles(
             column![].into()
         };
 
-        // Top-right corner with gear and popup
         let settings_corner: Element<'_, Input> = column![
             row![
                 column![].width(Length::Fill),
@@ -1912,6 +1928,11 @@ fn snap_to_rectangles(
         .spacing(4)
         .align_x(Alignment::End)
         .into();
+
+let current_tab_regions: &[SelectionRegion] = self.algo_tabs.iter()
+    .find(|t| t.id == self.active_algo_tab_id)
+    .map(|t| t.selection_regions.as_slice())
+    .unwrap_or(&[]);
 
 let visualization_content = if let Some(output) = &self.algorithm_output {
     let canvas = Canvas::new(BinCanvas {
@@ -1934,7 +1955,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             area_select_start: self.area_select_start,
             area_select_current: self.area_select_current,
             settings: &self.settings,
-            selection_regions: &self.selection_regions,
+            selection_regions: current_tab_regions,
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -2009,9 +2030,14 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         })
     };
 
-    // Build context menu overlay if visible
     let context_menu_overlay: Element<'_, Input> = if self.context_menu_visible {
         if let Some(region_idx) = self.context_menu_region {
+            let is_inherited = self.algo_tabs.iter()
+                .find(|t| t.id == self.active_algo_tab_id)
+                .and_then(|tab| tab.selection_regions.get(region_idx))
+                .map(|r| r.is_inherited)
+                .unwrap_or(false);
+
             let remove_button = button(
                 container(
                     text("Remove")
@@ -2036,38 +2062,37 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
                 }
             });
 
-            let repack_button = button(
-                container(
-                    text("Repack Region")
-                        .size(12)
-                        .font(ui_font)
+            let menu_content: Element<'_, Input> = if is_inherited {
+                column![remove_button].spacing(2).width(120).into()
+            } else {
+                let repack_button = button(
+                    container(
+                        text("Repack Region")
+                            .size(12)
+                            .font(ui_font)
+                    )
+                    .center_x(Length::Fill)
                 )
-                .center_x(Length::Fill)
-            )
-            .on_press(Input::RepackSelectionRegion(region_idx))
-            .padding([8, 16])
-            .width(Length::Fill)
-            .style(|_theme: &Theme, status| {
-                let base_bg = Color::from_rgb(0.12, 0.12, 0.15);
-                let hover_bg = Color::from_rgb(0.18, 0.18, 0.22);
-                button::Style {
-                    background: Some(match status {
-                        button::Status::Hovered => hover_bg.into(),
-                        _ => base_bg.into(),
-                    }),
-                    text_color: Color::from_rgb(0.9, 0.9, 0.92),
-                    ..Default::default()
-                }
-            });
+                .on_press(Input::RepackSelectionRegion(region_idx))
+                .padding([8, 16])
+                .width(Length::Fill)
+                .style(|_theme: &Theme, status| {
+                    let base_bg = Color::from_rgb(0.12, 0.12, 0.15);
+                    let hover_bg = Color::from_rgb(0.18, 0.18, 0.22);
+                    button::Style {
+                        background: Some(match status {
+                            button::Status::Hovered => hover_bg.into(),
+                            _ => base_bg.into(),
+                        }),
+                        text_color: Color::from_rgb(0.9, 0.9, 0.92),
+                        ..Default::default()
+                    }
+                });
 
-            container(
-                column![
-                    remove_button,
-                    repack_button,
-                ]
-                .spacing(2)
-                .width(120)
-            )
+                column![remove_button, repack_button].spacing(2).width(120).into()
+            };
+
+            container(menu_content)
             .padding(4)
             .style(|_theme: &Theme| {
                 container::Style {
@@ -2302,7 +2327,6 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             .width(Length::FillPortion(1))
             .height(Length::Fill);
 
-        // Tab buttons
         let viz_tab_active = self.active_tab == RightPanelTab::Visualization;
         let code_tab_active = self.active_tab == RightPanelTab::CodeEditor;
 
@@ -2401,7 +2425,6 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
 
                 let tab_label = text(tab.name).size(11).font(ui_font);
 
-                // Close button for non-root tabs
                 let close_btn: Element<'_, Input> = if !is_root {
                     button(text("×").size(10).font(ui_font))
                         .on_press(Input::RemoveAlgoTab(tab.id))
@@ -2494,7 +2517,6 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         .width(Length::Fill)
         .padding([4, 8]);
 
-        // Code editor panel (built from editor module)
         let editor_state = EditorState {
             code_editor_content: &self.code_editor_content,
             selected_language: self.selected_language,
@@ -2508,7 +2530,6 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
         };
         let code_panel_content = build_code_panel(&editor_state);
 
-        // Right panel content based on active tab
         let right_panel_content: Element<'_, Input> = match self.active_tab {
             RightPanelTab::Visualization => {
                 container(visualization_content)
