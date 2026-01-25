@@ -4,7 +4,6 @@ use crate::runner::{run_code, run_code_with_testcase, RunResult};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, text_editor, scrollable, slider};
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
-use std::fmt::format;
 use iced::widget::canvas::Canvas;
 use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings};
 use std::time::Duration;
@@ -45,6 +44,7 @@ impl Default for PackingApp {
             dragged_rect: None,
             dragged_rect_offset_x: 0.0,
             dragged_rect_offset_y: 0.0,
+            snap_preview: None,
             selected_rects: HashSet::new(),
             active_tab: RightPanelTab::Visualization,
             current_testcase: None,
@@ -80,6 +80,8 @@ class Packing:
                 snap_to_rectangles_enabled: true,
             },
             settings_panel_visible: false,
+            area_select_list: Vec::new(),
+            new_area_select: true,
             area_select_start: None,
             area_select_current: None,
             is_area_selecting: false,
@@ -265,21 +267,39 @@ impl PackingApp {
                 self.last_mouse_y = y;
                 self.dragged_rect_offset_x = 0.0;
                 self.dragged_rect_offset_y = 0.0;
+                self.snap_preview = None;
             }
-            Input::RectangleDragMove(x, y) => {
-                if self.dragged_rect.is_some() {
+            Input::RectangleDragMove(x, y, scale) => {
+                if let Some(dragged_idx) = self.dragged_rect {
                     let dx = x - self.last_mouse_x;
                     let dy = y - self.last_mouse_y;
                     self.dragged_rect_offset_x += dx;
                     self.dragged_rect_offset_y += dy;
                     self.last_mouse_x = x;
                     self.last_mouse_y = y;
-                    println!("HIIIII");
+
+                    // Calculate bin coords from the UPDATED offsets
+                    if self.settings.snap_to_rectangles_enabled {
+                        if let Some(output) = &self.algorithm_output {
+                            if dragged_idx < output.placements.len() {
+                                let p = &output.placements[dragged_idx];
+                                let bin_x = p.x.into_inner() + (self.dragged_rect_offset_x / scale);
+                                let bin_y = p.y.into_inner() - (self.dragged_rect_offset_y / scale);
+                                self.snap_preview = self.try_snap_rectangle(dragged_idx, bin_x, bin_y, true, false);
+                            } else {
+                                self.snap_preview = None;
+                            }
+                        } else {
+                            self.snap_preview = None;
+                        }
+                    } else {
+                        self.snap_preview = None;
+                    }
                 }
             }
             Input::RectangleDragEnd(is_inside, intersects, new_x, new_y) => {
-                if let Some(dragged_idx) = self.dragged_rect && 
-                    let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects) && 
+                if let Some(dragged_idx) = self.dragged_rect &&
+                    let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects) &&
                         let Some(output) = &mut self.algorithm_output && dragged_idx < output.placements.len() {
                                 output.placements[dragged_idx].x = OrderedFloat(final_x);
                                 output.placements[dragged_idx].y = OrderedFloat(final_y);
@@ -288,6 +308,7 @@ impl PackingApp {
                 self.dragged_rect = None;
                 self.dragged_rect_offset_x = 0.0;
                 self.dragged_rect_offset_y = 0.0;
+                self.snap_preview = None;
             }
             Input::Tick => {
                 if let Some(output) = &self.algorithm_output {
@@ -335,18 +356,15 @@ impl PackingApp {
 
                 match &action {
                     Action::Edit(Edit::Enter) => {
-                        // Smart enter: maintain indentation and add extra if line ends with ':'
                         let text = self.code_editor_content.text();
                         let (line, _col) = self.code_editor_content.cursor_position();
 
                         if let Some(current_line) = text.lines().nth(line) {
-                            // Get leading whitespace
                             let leading_ws: String = current_line
                                 .chars()
                                 .take_while(|c| c.is_whitespace())
                                 .collect();
 
-                            // Check if line ends with ':' (Python block start)
                             let trimmed = current_line.trim_end();
                             let extra_indent = if trimmed.ends_with(':') {
                                 "    " // 4 spaces
@@ -354,10 +372,8 @@ impl PackingApp {
                                 ""
                             };
 
-                            // Perform the enter action first
                             self.code_editor_content.perform(action);
 
-                            // Then insert the indentation
                             let indent = format!("{}{}", leading_ws, extra_indent);
                             for c in indent.chars() {
                                 self.code_editor_content.perform(Action::Edit(Edit::Insert(c)));
@@ -367,21 +383,17 @@ impl PackingApp {
                         }
                     }
                     Action::Edit(Edit::Insert('\t')) => {
-                        // Replace tab with 4 spaces
                         for _ in 0..4 {
                             self.code_editor_content.perform(Action::Edit(Edit::Insert(' ')));
                         }
                     }
                     Action::Edit(Edit::Backspace) => {
-                        // Smart backspace: delete 4 spaces at once if cursor is after indentation
                         let text = self.code_editor_content.text();
                         let (line, col) = self.code_editor_content.cursor_position();
 
                         let should_delete_tab = if col >= 4 {
                             if let Some(current_line) = text.lines().nth(line) {
-                                // Get the characters before the cursor on this line
                                 let chars_before: String = current_line.chars().take(col).collect();
-                                // Check if the last 4 characters are all spaces
                                 chars_before.ends_with("    ")
                             } else {
                                 false
@@ -391,7 +403,6 @@ impl PackingApp {
                         };
 
                         if should_delete_tab {
-                            // Delete 4 spaces (one tab-width)
                             for _ in 0..4 {
                                 self.code_editor_content.perform(Action::Edit(Edit::Backspace));
                             }
@@ -506,13 +517,10 @@ impl PackingApp {
                 const MIN_TOTAL_RECTS: i32 = 10;
                 const MAX_TOTAL_RECTS: i32 = 100;
 
-                // Generate random bin width
                 let bin_width = rng.random_range(MIN_BIN_WIDTH..=MAX_BIN_WIDTH);
 
-                // Generate random number of rectangle types
                 let num_types = rng.random_range(MIN_TYPES..=MAX_TYPES);
 
-                // Generate unique rectangle types
                 let mut rect_set: HashSet<(i32, i32)> = HashSet::new();
                 let mut rectangles: Vec<Rectangle> = Vec::new();
 
@@ -525,12 +533,11 @@ impl PackingApp {
                         rectangles.push(Rectangle {
                             width,
                             height,
-                            quantity: 1, // Start with 1, will add more below
+                            quantity: 1,
                         });
                     }
                 }
 
-                // Distribute remaining rectangles randomly
                 let target_total = rng.random_range(MIN_TOTAL_RECTS..=MAX_TOTAL_RECTS);
                 let mut current_total: i32 = rectangles.len() as i32;
 
@@ -574,7 +581,6 @@ impl PackingApp {
                 self.is_area_selecting = true;
                 self.area_select_start = Some((x, y));
                 self.area_select_current = Some((x, y));
-                // Hide context menu when starting area selection
                 self.context_menu_visible = false;
                 self.context_menu_region = None;
             }
@@ -584,13 +590,11 @@ impl PackingApp {
                 }
             }
             Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h) => {
-                // Create a persistent selection region with bin coordinates
-                if !selected_indices.is_empty() && bin_w > 0.0 && bin_h > 0.0 {
+               let mut can_create: bool = self.new_area_select; 
+                if bin_w > 0.0 && bin_h > 0.0 {
                     let mut final_x = bin_x;
                     let mut final_y = bin_y;
-                    let mut can_create = true;
 
-                    // Check intersections and snap if overlap is small (≤20%)
                     for existing in &self.selection_regions {
                         let new_x1 = final_x;
                         let new_y1 = final_y;
@@ -602,28 +606,21 @@ impl PackingApp {
                         let ex2 = existing.bin_x + existing.bin_w;
                         let ey2 = existing.bin_y + existing.bin_h;
 
-                        // Check if they intersect
                         if new_x1 < ex2 && new_x2 > ex1 && new_y1 < ey2 && new_y2 > ey1 {
-                            // Calculate overlap amounts in each direction
                             let overlap_x = (new_x2.min(ex2) - new_x1.max(ex1)).max(0.0);
                             let overlap_y = (new_y2.min(ey2) - new_y1.max(ey1)).max(0.0);
 
-                            // Calculate overlap as percentage of new region's dimension
                             let overlap_x_pct = overlap_x / bin_w;
                             let overlap_y_pct = overlap_y / bin_h;
 
-                            // If overlap is small enough (≤20% in either dimension), snap
                             if overlap_x_pct <= 0.2 || overlap_y_pct <= 0.2 {
-                                // Find the smallest push distance to resolve the overlap
-                                // Four possible directions: push left, right, up, down
-                                let push_left = new_x2 - ex1;   // Push new region left
-                                let push_right = ex2 - new_x1;  // Push new region right
-                                let push_down = new_y2 - ey1;   // Push new region down (in bin coords, down = lower y)
-                                let push_up = ey2 - new_y1;     // Push new region up
+                                let push_left = new_x2 - ex1;
+                                let push_right = ex2 - new_x1;
+                                let push_down = new_y2 - ey1;
+                                let push_up = ey2 - new_y1;
 
-                                // Find minimum push that's positive (meaning it resolves overlap)
                                 let mut min_push = f32::MAX;
-                                let mut push_dir = 0; // 0=left, 1=right, 2=down, 3=up
+                                let mut push_dir = 0;
 
                                 if push_left > 0.0 && push_left < min_push {
                                     min_push = push_left;
@@ -642,23 +639,20 @@ impl PackingApp {
                                     push_dir = 3;
                                 }
 
-                                // Apply the snap
                                 match push_dir {
-                                    0 => final_x = ex1 - bin_w, // Snap to left of existing
-                                    1 => final_x = ex2,         // Snap to right of existing
-                                    2 => final_y = ey1 - bin_h, // Snap below existing
-                                    3 => final_y = ey2,         // Snap above existing
+                                    0 => final_x = ex1 - bin_w,
+                                    1 => final_x = ex2,
+                                    2 => final_y = ey1 - bin_h,
+                                    3 => final_y = ey2,
                                     _ => {}
                                 }
                             } else {
-                                // Overlap too large, reject
                                 can_create = false;
                                 break;
                             }
                         }
                     }
 
-                    // After snapping, verify no remaining intersections
                     if can_create {
                         let final_x1 = final_x;
                         let final_y1 = final_y;
@@ -694,7 +688,6 @@ impl PackingApp {
                         self.selection_regions.push(region);
                         self.selection_region_indices.extend(selected_indices.iter().copied());
 
-                        // Add to selected_rects for visual feedback (but don't create tab yet)
                         if let Some(output) = &self.algorithm_output {
                             self.selected_rects.clear();
                             for idx in &selected_indices {
@@ -703,9 +696,9 @@ impl PackingApp {
                                 }
                             }
                         }
-                        // Tab creation is deferred until user clicks "Repack Region" in context menu
                     }
                 }
+                self.new_area_select = false;
                 self.is_area_selecting = false;
                 self.area_select_start = None;
                 self.area_select_current = None;
@@ -722,18 +715,17 @@ impl PackingApp {
             Input::RemoveSelectionRegion(region_idx) => {
                 if region_idx < self.selection_regions.len() {
                     let region = self.selection_regions[region_idx];
-                    // Remove the indices for this region from the flat list
                     let start = region.selected_indices_start;
                     let end = start + region.selected_indices_count;
                     self.selection_region_indices.drain(start..end);
 
-                    // Update indices for subsequent regions
                     for r in &mut self.selection_regions[region_idx + 1..] {
                         r.selected_indices_start -= region.selected_indices_count;
                     }
 
                     self.selection_regions.remove(region_idx);
                 }
+                self.new_area_select = true;
                 self.context_menu_visible = false;
                 self.context_menu_region = None;
             }
@@ -1872,7 +1864,7 @@ fn snap_to_rectangles(
                 .font(ui_font)
                 .text_size(11);
 
-            let snap_checkbox = checkbox("Snap to Rectangles", snap_to_rects_enabled)
+            let snap_checkbox = checkbox("Snap to Edge", snap_to_rects_enabled)
                 .on_toggle(Input::ToggleSnapToRectangles)
                 .size(14)
                 .font(ui_font)
@@ -1935,6 +1927,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             dragged_rect: self.dragged_rect,
             dragged_rect_offset_x: self.dragged_rect_offset_x,
             dragged_rect_offset_y: self.dragged_rect_offset_y,
+            snap_preview: self.snap_preview,
             animating: self.animating,
             selected_rects: &self.selected_rects,
             is_area_selecting: self.is_area_selecting,

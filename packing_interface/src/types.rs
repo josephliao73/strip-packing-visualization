@@ -63,7 +63,7 @@ pub enum Input {
     PanEnd,
     RectangleHovered(Option<usize>),
     RectangleDragStart(usize, f32, f32),
-    RectangleDragMove(f32, f32),
+    RectangleDragMove(f32, f32, f32),  // screen x, screen y, scale
     RectangleDragEnd(bool, bool, OrderedFloat<f32>, OrderedFloat<f32>),
     SnapAndAdjustHeight,
     RightClickCanvas(Option<usize>),
@@ -168,6 +168,7 @@ pub struct PackingApp {
     pub dragged_rect: Option<usize>,
     pub dragged_rect_offset_x: f32,
     pub dragged_rect_offset_y: f32,
+    pub snap_preview: Option<(f32, f32)>,  // (x, y) in bin coordinates where rect will snap
     pub selected_rects: HashSet<usize>,
     pub active_tab: RightPanelTab,
     pub current_testcase: Option<JsonInput>,
@@ -179,16 +180,17 @@ pub struct PackingApp {
     pub bottom_panel_tab: BottomPanelTab,
     pub code_errors: Vec<String>,
     pub code_output_json: Option<String>,
-    // Settings
     pub settings: Settings,
     pub settings_panel_visible: bool,
     // Area selection state
+    pub area_select_list: Vec<(f32, f32)>,
+    pub new_area_select: bool,
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
     pub is_area_selecting: bool,
     // Persistent selection regions
     pub selection_regions: Vec<SelectionRegion>,
-    pub selection_region_indices: Vec<usize>,  // Flat list of all selected indices for regions
+    pub selection_region_indices: Vec<usize>, 
     pub next_region_id: u64,
     pub context_menu_visible: bool,
     pub context_menu_region: Option<usize>,
@@ -220,6 +222,7 @@ pub struct BinCanvas<'a>  {
     pub dragged_rect: Option<usize>,
     pub dragged_rect_offset_x: f32,
     pub dragged_rect_offset_y: f32,
+    pub snap_preview: Option<(f32, f32)>,  // (x, y) in bin coordinates
     pub animating: bool,
     pub selected_rects: &'a HashSet<usize>,
     pub is_area_selecting: bool,

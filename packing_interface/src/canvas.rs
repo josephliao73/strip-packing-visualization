@@ -346,6 +346,23 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         Color::from_rgb(1.0, 0.35, 0.35)
                     };
                     frame.stroke(&rect_path, Stroke::default().with_color(stroke_color).with_width(2.0));
+
+                    // Draw snap preview if available (calculated by ui.rs using the actual snap logic)
+                    if let Some((snap_x, snap_y)) = self.snap_preview {
+                        let rect_h = p.height as f32;
+                        let preview_x = origin_x + snap_x * scale;
+                        let preview_y = origin_y + (bin_h_units - snap_y - rect_h) * scale;
+                        let preview_path = Path::rectangle(
+                            Point::new(preview_x, preview_y),
+                            Size::new(w, h)
+                        );
+                        frame.stroke(
+                            &preview_path,
+                            Stroke::default()
+                                .with_color(Color::from_rgba(0.3, 0.9, 1.0, 0.7))
+                                .with_width(2.0)
+                        );
+                    }
                 }
 
             }
@@ -418,8 +435,10 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 if let Some(position) = cursor.position() {
                     // First check if clicking on a persistent selection region
                     if let Some(region_idx) = self.find_region_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_h_units) {
-                        // Show context menu for this region
-                        (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, position.x, position.y)))
+                        // Show context menu for this region - use coordinates relative to canvas bounds
+                        let local_x = position.x - bounds.x;
+                        let local_y = position.y - bounds.y;
+                        (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, local_x, local_y)))
                     } else if self.hovered_rect.is_some() {
                         // Clicking on a rectangle - toggle selection
                         (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
@@ -594,7 +613,8 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 } else if self.is_panning {
                     (canvas::event::Status::Captured, Some(Input::PanMove(position.x, position.y)))
                 } else if self.dragged_rect.is_some() {
-                    (canvas::event::Status::Captured, Some(Input::RectangleDragMove(position.x, position.y)))
+                    // Send scale so ui.rs can calculate bin coords after updating offsets
+                    (canvas::event::Status::Captured, Some(Input::RectangleDragMove(position.x, position.y, scale)))
                 } else {
                     let now = Instant::now();
                     if let Some(last) = state.last_hover_time {
