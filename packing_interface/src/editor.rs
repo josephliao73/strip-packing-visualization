@@ -13,6 +13,7 @@ pub struct EditorState<'a> {
     pub show_visualization_button: bool,
     pub testcase_message: Option<&'a str>,
     pub testcase: Option<&'a JsonInput>,
+    pub is_root: bool,  // True for root tab, false for nodes (nodes don't have test cases)
 }
 
 fn build_language_selector(language: CodeLanguage) -> Element<'static, Input> {
@@ -312,22 +313,25 @@ fn build_bottom_panel_tab_bar<'a>(
     active_tab: BottomPanelTab,
     is_visible: bool,
     show_viz_button: bool,
+    is_root: bool,
 ) -> Element<'a, Input> {
     let output_tab_active = active_tab == BottomPanelTab::Output;
     let test_cases_tab_active = active_tab == BottomPanelTab::TestCases;
 
-    container(
-        row![
-            build_output_tab_button(output_tab_active),
-            build_test_cases_tab_button(test_cases_tab_active),
-            column![].width(Length::Fill),
-            build_toggle_panel_button(is_visible),
-            build_show_visualization_button(show_viz_button),
-            build_save_output_json_button(show_viz_button),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-    )
+    let mut tab_row = row![build_output_tab_button(output_tab_active)];
+
+    // Only show Test Cases tab for root (nodes use inherited region rectangles)
+    if is_root {
+        tab_row = tab_row.push(build_test_cases_tab_button(test_cases_tab_active));
+    }
+
+    tab_row = tab_row
+        .push(column![].width(Length::Fill))
+        .push(build_toggle_panel_button(is_visible))
+        .push(build_show_visualization_button(show_viz_button))
+        .push(build_save_output_json_button(show_viz_button));
+
+    container(tab_row.spacing(4).align_y(Alignment::Center))
     .padding([4, 8])
     .width(Length::Fill)
     .style(|_theme: &Theme| {
@@ -561,6 +565,7 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
         state.bottom_panel_tab,
         state.bottom_panel_visible,
         state.show_visualization_button,
+        state.is_root,
     );
 
     if state.bottom_panel_visible {

@@ -36,6 +36,14 @@ pub struct Rectangle {
     pub quantity: i32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy)]
+pub struct NonEmptySpace {
+    pub x_1: f32,
+    pub x_2: f32,
+    pub y_1: f32,
+    pub y_2: f32,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JsonInput {
     pub width_of_bin: i32,
@@ -129,10 +137,7 @@ pub struct AlgoTab {
     pub id: u64,
     pub name: String,
     pub selected_indices: Vec<usize>,
-    // Each tab has its own selection regions
-    // Root: max 1 region, Others: max 2 (1 inherited + 1 new)
     pub selection_regions: Vec<SelectionRegion>,
-    // Each tab has its own code
     pub code: String,
 }
 

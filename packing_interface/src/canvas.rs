@@ -82,45 +82,6 @@ impl<'a> BinCanvas<'a> {
         }
     }
 
-    pub fn find_rectangles_in_area(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32, bounds: &iced::Rectangle, scale: f32, origin_x: f32, origin_y: f32, bin_h_units: f32) -> Vec<usize> {
-        let total = self.output.placements.len();
-        let count = self.visible_count.min(total);
-
-        // Convert to local coordinates
-        let local_start_x = start_x - bounds.x;
-        let local_start_y = start_y - bounds.y;
-        let local_end_x = end_x - bounds.x;
-        let local_end_y = end_y - bounds.y;
-
-        // Normalize selection area (handle any drag direction)
-        let sel_min_x = local_start_x.min(local_end_x);
-        let sel_max_x = local_start_x.max(local_end_x);
-        let sel_min_y = local_start_y.min(local_end_y);
-        let sel_max_y = local_start_y.max(local_end_y);
-
-        let mut result = Vec::new();
-
-        for (idx, p) in self.output.placements.iter().enumerate().take(count) {
-            let w = p.width as f32 * scale;
-            let h = p.height as f32 * scale;
-            let rect_x = origin_x + p.x.into_inner() * scale;
-            let rect_y = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
-
-            // Check if rectangle intersects with selection area
-            let rect_min_x = rect_x;
-            let rect_max_x = rect_x + w;
-            let rect_min_y = rect_y;
-            let rect_max_y = rect_y + h;
-
-            // Intersection check
-            if rect_max_x >= sel_min_x && rect_min_x <= sel_max_x &&
-               rect_max_y >= sel_min_y && rect_min_y <= sel_max_y {
-                result.push(idx);
-            }
-        }
-        result
-    }
-
     pub fn find_region_at_point(&self, x: f32, y: f32, bounds: &iced::Rectangle, scale: f32, origin_x: f32, origin_y: f32, bin_h_units: f32) -> Option<usize> {
         let local_x = x - bounds.x;
         let local_y = y - bounds.y;
@@ -458,11 +419,6 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
                 if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((end_x, end_y)) = self.area_select_current {
-                    let selected_indices = self.find_rectangles_in_area(
-                        start_x, start_y, end_x, end_y,
-                        &bounds, scale, origin_x, origin_y, bin_h_units
-                    );
-
                     let local_start_x = start_x - bounds.x;
                     let local_start_y = start_y - bounds.y;
                     let local_end_x = end_x - bounds.x;
@@ -492,7 +448,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     let bin_w = (clamped_x2 - clamped_x).max(0.0);
                     let bin_h = (clamped_y2 - clamped_y).max(0.0);
 
-                    (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h)))
+                    (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(Vec::new(), bin_x, bin_y, bin_w, bin_h)))
                 } else if self.is_area_selecting {
                     (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(Vec::new(), 0.0, 0.0, 0.0, 0.0)))
                 } else {

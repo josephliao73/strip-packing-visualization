@@ -1,5 +1,3 @@
-// Java Runner for Packing Solutions
-// This class wraps user code and handles I/O
 
 import java.util.*;
 import java.util.regex.*;
@@ -26,7 +24,6 @@ public class PackingRunner {
             if (top > totalHeight) totalHeight = top;
         }
 
-        // Output JSON
         StringBuilder sb = new StringBuilder();
         sb.append("{\"bin_width\":").append(binWidth);
         sb.append(",\"total_height\":").append(totalHeight);

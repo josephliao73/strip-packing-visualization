@@ -1,4 +1,4 @@
-use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, ParseOutput, Rectangle};
+use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, ParseOutput, Rectangle, NonEmptySpace};
 use std::{path::PathBuf};
 
 #[derive(Debug, Clone)]
@@ -15,6 +15,7 @@ pub enum RunResult {
 pub trait LanguageRunner {
     fn file_extension(&self) -> &'static str;
     fn run(&self, code: &str, bin_width: i32, rectangles: &[Rectangle]) -> RunResult;
+    fn repack_run(&self, code: &str, bin_height: f32, bin_width: f32, rectangles: &[Rectangle], non_empty_space: &[NonEmptySpace] ) -> RunResult;
 }
 
 pub struct PythonRunner;
@@ -62,6 +63,80 @@ impl LanguageRunner for PythonRunner {
             .arg(&solution_path)
             .arg(bin_width.to_string())
             .arg(&rectangles_str)
+            .output();
+
+        let output1 = std::process::Command::new("python3").arg(&runner_path).arg(&solution_path).output();
+        println!("FU NK {:?}", &output1);
+
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    println!("STDOUT {:?}", stdout);
+                    match serde_json::from_str::<AlgorithmOutput>(&stdout) {
+                        Ok(algo_output) => RunResult::Success {
+                            output: algo_output,
+                            raw_json: stdout,
+                        },
+                        Err(e) => RunResult::Error {
+                            errors: vec![format!("Failed to parse output: {}", e)],
+                        },
+                    }
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    RunResult::Error {
+                        errors: stderr.lines().map(|s| s.to_string()).collect(),
+                    }
+                }
+            }
+            Err(e) => RunResult::Error {
+                errors: vec![format!("Failed to run Python: {}", e)],
+            },
+        }
+    }
+    fn repack_run (&self, code: &str, bin_height: f32, bin_width: f32, rectangles: &[Rectangle], non_empty_space: &[NonEmptySpace])-> RunResult {
+        let rectangles_json: Vec<Vec<i32>> = rectangles
+            .iter()
+            .map(|r| vec![r.width, r.height, r.quantity])
+            .collect();
+        let rectangles_str = match serde_json::to_string(&rectangles_json) {
+            Ok(s) => s,
+            Err(e) => {
+                return RunResult::Error {
+                    errors: vec![format!("Failed to serialize rectangles: {}", e)],
+                }
+            }
+        };
+
+        let non_empty_space_str = match serde_json::to_string(&non_empty_space) {
+            Ok(s) => s,
+            Err(e) => {
+                return RunResult::Error {
+                    errors: vec![format!("Failed to serialize non-empty space: {}", e)],
+                }
+            }
+        };
+
+        let temp_dir = std::env::temp_dir();
+        println!("TEMP DIR: {:?}", temp_dir);
+        let solution_path = temp_dir.join("./sol.py");
+
+        if let Err(e) = std::fs::write(&solution_path, code) {
+            return RunResult::Error {
+                errors: vec![format!("Failed to write solution file: {}", e)],
+            };
+        }
+        println!("REC LIST");
+        dbg!(rectangles);
+        let runner_path = Self::get_runner_path();
+
+        let output = std::process::Command::new("python3")
+            .arg(&runner_path)
+            .arg(&solution_path)
+            .arg(bin_height.to_string())
+            .arg(bin_width.to_string())
+            .arg(&rectangles_str)
+            .arg(&non_empty_space_str)
             .output();
 
         let output1 = std::process::Command::new("python3").arg(&runner_path).arg(&solution_path).output();
@@ -184,6 +259,7 @@ int main(int argc, char* argv[]) {
     }
 }
 
+/*
 impl LanguageRunner for CppRunner {
     fn file_extension(&self) -> &'static str {
         "cpp"
@@ -434,12 +510,12 @@ impl LanguageRunner for JavaRunner {
         }
     }
 }
-
+*/
 pub fn get_runner(language: CodeLanguage) -> Box<dyn LanguageRunner> {
     match language {
         CodeLanguage::Python => Box::new(PythonRunner),
-        CodeLanguage::Cpp => Box::new(CppRunner),
-        CodeLanguage::Java => Box::new(JavaRunner),
+        CodeLanguage::Cpp => Box::new(PythonRunner),
+        CodeLanguage::Java => Box::new(PythonRunner),
     }
 }
 
@@ -460,4 +536,16 @@ pub fn run_code_with_testcase(
     println!("{:?}", language);
     let runner = get_runner(language);
     runner.run(code, testcase.width_of_bin, &testcase.rectangle_list)
+}
+
+pub fn run_repack_code_with_testcase(
+    language: CodeLanguage,
+    code: &str,
+    testcase: &JsonInput,
+    bin_height: f32,
+    non_empty_space: &[NonEmptySpace]
+) -> RunResult {
+    println!("{:?}", language);
+    let runner = get_runner(language);
+    runner.repack_run(code, bin_height, testcase.width_of_bin as f32, &testcase.rectangle_list, non_empty_space)
 }

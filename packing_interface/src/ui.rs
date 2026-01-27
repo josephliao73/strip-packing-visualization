@@ -1,11 +1,11 @@
 use crate::config_parser::create_input;
 use crate::editor::{build_code_panel, EditorState};
-use crate::runner::{run_code, run_code_with_testcase, RunResult};
+use crate::runner::{RunResult, run_code, run_code_with_testcase, run_repack_code_with_testcase};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, text_editor, scrollable, slider};
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -108,7 +108,8 @@ impl Default for PackingApp {
             },
             settings_panel_visible: false,
             area_select_list: Vec::new(),
-            new_area_select: true,
+            new_area_select: true, // true = none created so can create, false = one created so
+                                   // can't create
             area_select_start: None,
             area_select_current: None,
             is_area_selecting: false,
@@ -319,13 +320,23 @@ impl PackingApp {
                 }
             }
             Input::RectangleDragEnd(is_inside, intersects, new_x, new_y) => {
+                let mut height_changed = false;
                 if let Some(dragged_idx) = self.dragged_rect &&
                     let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects) &&
                         let Some(output) = &mut self.algorithm_output && dragged_idx < output.placements.len() {
                                 output.placements[dragged_idx].x = OrderedFloat(final_x);
                                 output.placements[dragged_idx].y = OrderedFloat(final_y);
-                                self.recalculate_bin_height();
+                                height_changed = self.recalculate_bin_height();
                 }
+
+                // If height changed, clear selection regions for current tab
+                if height_changed {
+                    if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                        tab.selection_regions.clear();
+                        self.new_area_select = true;
+                    }
+                }
+
                 self.dragged_rect = None;
                 self.dragged_rect_offset_x = 0.0;
                 self.dragged_rect_offset_y = 0.0;
@@ -440,35 +451,116 @@ impl PackingApp {
                 self.selected_language = lang;
             }
             Input::RunCode => {
-                if let Some(testcase) = &self.current_testcase {
-                    let user_code = self.code_editor_content.text();
-                    let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
-                    println!("{:?}", result);
+                let is_root = self.active_algo_tab_id == 0;
 
-                    match result {
-                        RunResult::Success { output, raw_json } => {
-                            self.algorithm_output = Some(output);
-                            self.visible_rects = 0;
-                            self.animating = true;
-                            self.selected_rects.clear();
-                            self.output_revision = self.output_revision.wrapping_add(1);
-                            self.rebuild_hit_grid();
-                            self.active_tab = RightPanelTab::Visualization;
-                            self.error_message = Some("✓ Code executed successfully".to_string());
-                            self.code_output_json = Some(raw_json);
-                            self.code_errors.clear();
-                            self.bottom_panel_tab = BottomPanelTab::Output;
+                if is_root {
+                    // Root tab: use test case
+                    if let Some(testcase) = &self.current_testcase {
+                        let user_code = self.code_editor_content.text();
+                        let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
+                        println!("{:?}", result);
+
+                        match result {
+                            RunResult::Success { output, raw_json } => {
+                                self.algorithm_output = Some(output);
+                                self.visible_rects = 0;
+                                self.animating = true;
+                                self.selected_rects.clear();
+                                self.output_revision = self.output_revision.wrapping_add(1);
+                                self.rebuild_hit_grid();
+                                self.active_tab = RightPanelTab::Visualization;
+                                self.error_message = Some("✓ Code executed successfully".to_string());
+                                self.code_output_json = Some(raw_json);
+                                self.code_errors.clear();
+                                self.bottom_panel_tab = BottomPanelTab::Output;
+                                // Reset drawing state and clear regions (new output = old regions invalid)
+                                self.new_area_select = true;
+                                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                                    tab.selection_regions.clear();
+                                }
+                            }
+                            RunResult::Error { errors } => {
+                                self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
+                                self.code_errors = errors;
+                                self.code_output_json = None;
+                                self.bottom_panel_tab = BottomPanelTab::Problems;
+                            }
                         }
-                        RunResult::Error { errors } => {
-                            self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
-                            self.code_errors = errors;
-                            self.code_output_json = None;
-                            self.bottom_panel_tab = BottomPanelTab::Problems;
-                        }
+                    } else {
+                        self.error_message = Some("No test case loaded. Import a test case first.".to_string());
+                        self.bottom_panel_tab = BottomPanelTab::TestCases;
                     }
                 } else {
-                    self.error_message = Some("No test case loaded. Import a test case first.".to_string());
-                    self.bottom_panel_tab = BottomPanelTab::TestCases;
+                    let tab_data = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id).cloned();
+                    if let Some(tab) = tab_data {
+                        if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
+                            if let Some(output) = &self.algorithm_output {
+                                let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
+
+                                let mut rectangles: Vec<Rectangle> = Vec::new();
+                                for &idx in &selected_indices {
+                                    let p = &output.placements[idx];
+                                    rectangles.push(Rectangle { width: p.width, height: p.height, quantity: 1 });
+                                }
+
+                                let mut non_empty_space: Vec<NonEmptySpace> = Vec::new();
+                                for &idx in &non_selected_indices {
+                                    let p = &output.placements[idx];
+                                    let x_1 = p.x.into_inner();
+                                    let y_1 = p.y.into_inner();
+                                    let x_2 = x_1 + p.width as f32;
+                                    let y_2 = y_1 + p.height as f32;
+                                    non_empty_space.push(NonEmptySpace { x_1, x_2, y_1, y_2 });
+                                }
+
+                                if !rectangles.is_empty() {
+                                    let user_code = self.code_editor_content.text();
+                                    let temp_testcase = JsonInput {
+                                        width_of_bin: output.bin_width,
+                                        number_of_rectangles: rectangles.len(),
+                                        number_of_types_of_rectangles: rectangles.len(),
+                                        autofill_option: false,
+                                        rectangle_list: rectangles,
+                                    };
+
+                                    let result = run_repack_code_with_testcase(
+                                        self.selected_language,
+                                        &user_code,
+                                        &temp_testcase,
+                                        output.total_height,
+                                        &non_empty_space,
+                                    );
+
+                                    match result {
+                                        RunResult::Success { output: new_output, raw_json } => {
+                                            self.algorithm_output = Some(new_output);
+                                            self.visible_rects = 0;
+                                            self.animating = true;
+                                            self.selected_rects.clear();
+                                            self.output_revision = self.output_revision.wrapping_add(1);
+                                            self.rebuild_hit_grid();
+                                            self.active_tab = RightPanelTab::Visualization;
+                                            self.error_message = Some("✓ Code executed successfully".to_string());
+                                            self.code_output_json = Some(raw_json);
+                                            self.code_errors.clear();
+                                            self.bottom_panel_tab = BottomPanelTab::Output;
+                                            self.new_area_select = true;
+                                        }
+                                        RunResult::Error { errors } => {
+                                            self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
+                                            self.code_errors = errors;
+                                            self.code_output_json = None;
+                                            self.bottom_panel_tab = BottomPanelTab::Problems;
+                                        }
+                                    }
+                                } else {
+                                    self.error_message = Some("Select at least one rectangle inside the region.".to_string());
+                                }
+                            }
+                        } else {
+                            self.error_message = Some("No inherited region found.".to_string());
+                        }
+                    }
                 }
             }
             Input::BottomPanelTabSelected(tab) => {
@@ -607,7 +699,7 @@ impl PackingApp {
                     self.area_select_current = Some((x, y));
                 }
             }
-            Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h) => {
+            Input::AreaSelectEnd(_selected_indices, bin_x, bin_y, bin_w, bin_h) => {
                 let current_tab_idx = self.algo_tabs.iter().position(|t| t.id == self.active_algo_tab_id);
 
                 if let Some(tab_idx) = current_tab_idx {
@@ -708,18 +800,9 @@ impl PackingApp {
                                 bin_y: final_y,
                                 bin_w,
                                 bin_h,
-                                selected_indices: selected_indices.clone(),
+                                selected_indices: Vec::new(),
                             };
                             self.algo_tabs[tab_idx].selection_regions.push(region);
-
-                            if let Some(output) = &self.algorithm_output {
-                                self.selected_rects.clear();
-                                for idx in &selected_indices {
-                                    if *idx < output.placements.len() {
-                                        self.selected_rects.insert(*idx);
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -786,20 +869,27 @@ impl PackingApp {
                         let tab_id = self.next_algo_tab_id;
                         self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
 
+                        let selected_indices = if let Some(output) = &self.algorithm_output {
+                            let (selected_indices, _) = self.split_region_rectangles(output, &region);
+                            selected_indices
+                        } else {
+                            Vec::new()
+                        };
+
                         let inherited_region = SelectionRegion {
                             is_inherited: true,
                             bin_x: region.bin_x,
                             bin_y: region.bin_y,
                             bin_w: region.bin_w,
                             bin_h: region.bin_h,
-                            selected_indices: region.selected_indices.clone(),
+                            selected_indices: selected_indices.clone(),
                         };
 
                         // New tab inherits parent's code
                         self.algo_tabs.push(AlgoTab {
                             id: tab_id,
                             name: new_name,
-                            selected_indices: region.selected_indices.clone(),
+                            selected_indices,
                             selection_regions: vec![inherited_region],
                             code: new_code,
                         });
@@ -1197,8 +1287,10 @@ fn snap_to_rectangles(
     best
 }
 
-    fn recalculate_bin_height(&mut self) {
-        if let Some(output) = &mut self.algorithm_output {
+    /// Recalculates bin height and returns true if height changed
+    fn recalculate_bin_height(&mut self) -> bool {
+        let height_changed = if let Some(output) = &mut self.algorithm_output {
+            let old_height = output.total_height;
             let mut max_height = OrderedFloat(0.0);
             for placement in &output.placements {
                 let top = placement.y + placement.height as f32;
@@ -1207,9 +1299,13 @@ fn snap_to_rectangles(
                 }
             }
             output.total_height = max_height.into_inner();
-            self.output_revision = self.output_revision.wrapping_add(1);
-            self.rebuild_hit_grid();
-        }
+            (output.total_height - old_height).abs() > 0.001
+        } else {
+            false
+        };
+        self.output_revision = self.output_revision.wrapping_add(1);
+        self.rebuild_hit_grid();
+        height_changed
     }
 
     fn update_rectangle_line_info(&mut self) {
@@ -1277,6 +1373,9 @@ fn snap_to_rectangles(
 
         self.active_algo_tab_id = tab_id;
 
+        // Reset area select state for new tab (each tab can create regions independently)
+        self.new_area_select = true;
+
         // Load new tab's code
         if let Some(new_tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
             self.code_editor_content = text_editor::Content::with_text(&new_tab.code);
@@ -1297,6 +1396,38 @@ fn snap_to_rectangles(
             tab.selected_indices = self.selected_rects.iter().copied().collect();
             tab.selected_indices.sort_unstable();
         }
+    }
+
+    fn split_region_rectangles(&self, output: &AlgorithmOutput, region: &SelectionRegion) -> (Vec<usize>, Vec<usize>) {
+        let mut selected = Vec::new();
+        let mut non_selected = Vec::new();
+
+        let region_min_x = region.bin_x;
+        let region_max_x = region.bin_x + region.bin_w;
+        let region_min_y = region.bin_y;
+        let region_max_y = region.bin_y + region.bin_h;
+
+        for (idx, p) in output.placements.iter().enumerate() {
+            let rect_min_x = p.x.into_inner();
+            let rect_max_x = rect_min_x + p.width as f32;
+            let rect_min_y = p.y.into_inner();
+            let rect_max_y = rect_min_y + p.height as f32;
+
+            let intersects = rect_max_x >= region_min_x
+                && rect_min_x <= region_max_x
+                && rect_max_y >= region_min_y
+                && rect_min_y <= region_max_y;
+
+            if intersects {
+                if self.selected_rects.contains(&idx) {
+                    selected.push(idx);
+                } else {
+                    non_selected.push(idx);
+                }
+            }
+        }
+
+        (selected, non_selected)
     }
 
     fn parse_rectangles(&self) -> Result<ParseOutput, Vec<String>> {
@@ -2565,6 +2696,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             show_visualization_button: false,
             testcase_message: self.testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
+            is_root: self.active_algo_tab_id == 0,
         };
         let code_panel_content = build_code_panel(&editor_state);
 
