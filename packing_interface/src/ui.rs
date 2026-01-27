@@ -10,6 +10,51 @@ use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
 
+const ROOT_CODE: &str = r#"
+import packing_lib
+import json
+from typing import List, Tuple
+
+class Packing:
+    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
+        """
+        Pack rectangles into a bin of given width.
+
+        Args:
+            bin_width: Width of the bin
+            rectangles: List of (width, height, quantity) tuples
+
+        Returns:
+            List of (x, y, width, height) placements for each rectangle
+        """
+        placements = [[1,1,2,2], [3,3,1,1]]
+        # Your packing algorithm here
+        return packing_lib.make_output(5, 6, placements)
+"#;
+
+const NODE_CODE: &str = r#"
+import packing_lib
+import json
+from typing import List, Tuple
+
+class Repacking:
+    def solve(self, bin_height: int, bin_width: int, rectangles: List[Tuple[int, int, int]], non_empty_space: List[Tuple[int, int]]) -> List[Tuple[float, float, int, int]]:
+        """
+        Pack rectangles into a bin of given width.
+
+        Args:
+            bin_height: height of the bin
+            bin_width: Width of the bin
+            rectangles: List of (width, height, quantity) tuples
+
+        Returns:
+            List of (x, y, width, height) placements for each rectangle
+        """
+        placements = [[1,1,2,2], [3,3,1,1]]
+        # Your packing algorithm here
+        return packing_lib.make_output(5, 6, placements)
+"#;
+
 impl Default for PackingApp {
     fn default() -> Self {
         Self {
@@ -29,6 +74,7 @@ impl Default for PackingApp {
                 name: "Root".to_string(),
                 selected_indices: Vec::new(),
                 selection_regions: Vec::new(),
+                code: ROOT_CODE.to_string(),
             }],
             active_algo_tab_id: 0,
             next_algo_tab_id: 1,
@@ -50,27 +96,7 @@ impl Default for PackingApp {
             active_tab: RightPanelTab::Visualization,
             current_testcase: None,
             testcase_message: None,
-            code_editor_content: text_editor::Content::with_text(r#"
-import packing_lib
-import json
-from typing import List, Tuple
-
-class Packing:
-    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
-        """
-        Pack rectangles into a bin of given width.
-
-        Args:
-            bin_width: Width of the bin
-            rectangles: List of (width, height, quantity) tuples
-
-        Returns:
-            List of (x, y, width, height) placements for each rectangle
-        """
-        placements = [[1,1,2,2], [3,3,1,1]]
-        # Your packing algorithm here
-        return packing_lib.make_output(5, 6, placements)
-"#),
+            code_editor_content: text_editor::Content::with_text(ROOT_CODE),
             selected_language: CodeLanguage::Python,
             bottom_panel_visible: true,
             bottom_panel_tab: BottomPanelTab::Problems,
@@ -753,25 +779,30 @@ impl PackingApp {
                         .count();
 
                     let new_name = format!("{}{}", prefix, child_count + 1);
+                        let new_code: String = NODE_CODE.to_string();
 
-                    let tab_id = self.next_algo_tab_id;
-                    self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+                        self.algo_tabs[tab_idx].code = new_code.clone(); 
 
-                    let inherited_region = SelectionRegion {
-                        is_inherited: true,
-                        bin_x: region.bin_x,
-                        bin_y: region.bin_y,
-                        bin_w: region.bin_w,
-                        bin_h: region.bin_h,
-                        selected_indices: region.selected_indices.clone(),
-                    };
+                        let tab_id = self.next_algo_tab_id;
+                        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
 
-                    self.algo_tabs.push(AlgoTab {
-                        id: tab_id,
-                        name: new_name,
-                        selected_indices: region.selected_indices.clone(),
-                        selection_regions: vec![inherited_region],
-                    });
+                        let inherited_region = SelectionRegion {
+                            is_inherited: true,
+                            bin_x: region.bin_x,
+                            bin_y: region.bin_y,
+                            bin_w: region.bin_w,
+                            bin_h: region.bin_h,
+                            selected_indices: region.selected_indices.clone(),
+                        };
+
+                        // New tab inherits parent's code
+                        self.algo_tabs.push(AlgoTab {
+                            id: tab_id,
+                            name: new_name,
+                            selected_indices: region.selected_indices.clone(),
+                            selection_regions: vec![inherited_region],
+                            code: new_code,
+                        });
 
                     self.algo_tabs[tab_idx].selection_regions.remove(region_idx);
 
@@ -1238,16 +1269,23 @@ fn snap_to_rectangles(
     }
 
     fn set_active_algo_tab(&mut self, tab_id: u64) {
-        self.active_algo_tab_id = tab_id;
-        if tab_id == 0 {
-            self.selected_rects.clear();
-            return;
+        // Save current tab's code before switching
+        let current_code = self.code_editor_content.text();
+        if let Some(current_tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+            current_tab.code = current_code;
         }
-        if let Some(tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
+
+        self.active_algo_tab_id = tab_id;
+
+        // Load new tab's code
+        if let Some(new_tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
+            self.code_editor_content = text_editor::Content::with_text(&new_tab.code);
             self.selected_rects.clear();
-            for idx in &tab.selected_indices {
+            for idx in &new_tab.selected_indices {
                 self.selected_rects.insert(*idx);
             }
+        } else {
+            self.selected_rects.clear();
         }
     }
 

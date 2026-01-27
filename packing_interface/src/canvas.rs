@@ -435,8 +435,20 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         // Clicking on a rectangle - toggle selection
                         (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
                     } else if self.settings.area_select_enabled {
-                        // Start area selection if enabled and not on a rectangle
-                        (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
+                        // Only start area selection if click is INSIDE the bin rectangle
+                        let local_x = position.x - bounds.x;
+                        let local_y = position.y - bounds.y;
+                        let bin_rect = iced::Rectangle {
+                            x: origin_x,
+                            y: origin_y,
+                            width: bin_w_units * scale,
+                            height: bin_h_units * scale,
+                        };
+                        if bin_rect.contains(Point::new(local_x, local_y)) {
+                            (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
+                        } else {
+                            (canvas::event::Status::Ignored, None)
+                        }
                     } else {
                         (canvas::event::Status::Ignored, None)
                     }
@@ -456,15 +468,29 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                     let local_end_x = end_x - bounds.x;
                     let local_end_y = end_y - bounds.y;
 
+                    // Convert to bin coordinates
                     let bin_x1 = (local_start_x - origin_x) / scale;
                     let bin_y1 = bin_h_units - (local_start_y - origin_y) / scale;
                     let bin_x2 = (local_end_x - origin_x) / scale;
                     let bin_y2 = bin_h_units - (local_end_y - origin_y) / scale;
 
-                    let bin_x = bin_x1.min(bin_x2);
-                    let bin_y = bin_y1.min(bin_y2);
-                    let bin_w = (bin_x2 - bin_x1).abs();
-                    let bin_h = (bin_y2 - bin_y1).abs();
+                    // Get min/max corners
+                    let raw_x = bin_x1.min(bin_x2);
+                    let raw_y = bin_y1.min(bin_y2);
+                    let raw_x2 = bin_x1.max(bin_x2);
+                    let raw_y2 = bin_y1.max(bin_y2);
+
+                    // Clamp to bin boundaries
+                    let clamped_x = raw_x.max(0.0);
+                    let clamped_y = raw_y.max(0.0);
+                    let clamped_x2 = raw_x2.min(bin_w_units);
+                    let clamped_y2 = raw_y2.min(bin_h_units);
+
+                    // Calculate final width/height after clamping
+                    let bin_x = clamped_x;
+                    let bin_y = clamped_y;
+                    let bin_w = (clamped_x2 - clamped_x).max(0.0);
+                    let bin_h = (clamped_y2 - clamped_y).max(0.0);
 
                     (canvas::event::Status::Captured, Some(Input::AreaSelectEnd(selected_indices, bin_x, bin_y, bin_w, bin_h)))
                 } else if self.is_area_selecting {

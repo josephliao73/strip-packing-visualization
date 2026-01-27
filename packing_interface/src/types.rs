@@ -132,6 +132,8 @@ pub struct AlgoTab {
     // Each tab has its own selection regions
     // Root: max 1 region, Others: max 2 (1 inherited + 1 new)
     pub selection_regions: Vec<SelectionRegion>,
+    // Each tab has its own code
+    pub code: String,
 }
 
 #[derive(Debug, Clone)]
