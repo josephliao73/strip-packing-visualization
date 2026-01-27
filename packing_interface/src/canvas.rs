@@ -388,12 +388,12 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
                 if let Some(position) = cursor.position() {
-                    if let Some(region_idx) = self.find_region_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_h_units) {
+                    if self.hovered_rect.is_some() {
+                        (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
+                    } else if let Some(region_idx) = self.find_region_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_h_units) {
                         let local_x = position.x - bounds.x;
                         let local_y = position.y - bounds.y;
                         (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, local_x, local_y)))
-                    } else if self.hovered_rect.is_some() {
-                        (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
                     } else if self.settings.area_select_enabled {
                         let local_x = position.x - bounds.x;
                         let local_y = position.y - bounds.y;

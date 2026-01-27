@@ -5,7 +5,7 @@ use iced::widget::{button, checkbox, column, container, row, text, text_input, t
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -17,19 +17,26 @@ from typing import List, Tuple
 
 class Packing:
     def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
-        """
-        Pack rectangles into a bin of given width.
+        items = []
+        for item in rectangles:
+            w, h, q = item
+            for _ in range(q):
+                items.append({
+                    "width": w,
+                    "height": h
+                })
 
-        Args:
-            bin_width: Width of the bin
-            rectangles: List of (width, height, quantity) tuples
+        placements = []
+        total_height = 0
 
-        Returns:
-            List of (x, y, width, height) placements for each rectangle
-        """
-        placements = [[1,1,2,2], [3,3,1,1]]
-        # Your packing algorithm here
-        return packing_lib.make_output(5, 6, placements)
+        for rect in items:
+            w = rect["width"]
+            h = rect["height"]
+
+            placements.append([0, total_height, w, h])
+            total_height += h
+
+        return packing_lib.make_output(bin_width, total_height, placements)
 "#;
 
 const NODE_CODE: &str = r#"
@@ -39,20 +46,50 @@ from typing import List, Tuple
 
 class Repacking:
     def solve(self, bin_height: int, bin_width: int, rectangles: List[Tuple[int, int, int]], non_empty_space: List[Tuple[int, int]]) -> List[Tuple[float, float, int, int]]:
-        """
-        Pack rectangles into a bin of given width.
+        items = []
+        for item in rectangles:
+            w, h, q = item
+            for _ in range(q):
+                items.append({
+                    "width": w,
+                    "height": h
+                })
 
-        Args:
-            bin_height: height of the bin
-            bin_width: Width of the bin
-            rectangles: List of (width, height, quantity) tuples
+        items.sort(key=lambda x: -x["height"])
 
-        Returns:
-            List of (x, y, width, height) placements for each rectangle
-        """
-        placements = [[1,1,2,2], [3,3,1,1]]
-        # Your packing algorithm here
-        return packing_lib.make_output(5, 6, placements)
+        levels = []
+        placements = []
+        current_y = 0
+
+        for rect in items:
+            w = rect["width"]
+            h = rect["height"]
+
+            placed = False
+
+            for level in levels:
+                if level["used_width"] + w <= bin_width:
+                    x = level["used_width"]
+                    y = level["y"]
+
+                    placements.append([x, y, w, h])
+                    level["used_width"] += w
+                    placed = True
+                    break
+
+            if not placed:
+                new_level = {
+                    "height": h,
+                    "used_width": w,
+                    "y": current_y
+                }
+                levels.append(new_level)
+
+                placements.append([0, current_y, w, h])
+                current_y += h
+
+        total_height = sum(level["height"] for level in levels)
+        return packing_lib.make_output(bin_width, total_height, placements)
 "#;
 
 impl Default for PackingApp {
@@ -66,9 +103,6 @@ impl Default for PackingApp {
             rect_total_lines: 1,
             rect_cursor_line: 1,
             error_message: None,
-            algorithm_output: None,
-            output_revision: 0,
-            hit_grid: None,
             algo_tabs: vec![AlgoTab {
                 id: 0,
                 name: "Root".to_string(),
@@ -76,12 +110,17 @@ impl Default for PackingApp {
                 selection_regions: Vec::new(),
                 code: ROOT_CODE.to_string(),
                 last_right_panel_tab: RightPanelTab::Visualization,
+                algorithm_output: None,
+                parent_output: None,
+                repack_output: None,
+                output_revision: 0,
+                hit_grid: None,
+                visible_rects: 0,
+                animating: false,
             }],
             active_algo_tab_id: 0,
             next_algo_tab_id: 1,
             zoom: 1.0,
-            visible_rects: 0,
-            animating: false,
             animation_speed: 80.0,
             pan_x: 0.0,
             pan_y: 0.0,
@@ -192,13 +231,17 @@ impl PackingApp {
                         Ok(contents) => {
                             match serde_json::from_str::<AlgorithmOutput>(&contents) {
                                 Ok(output) => {
-                                    self.algorithm_output = Some(output);
-                                    self.visible_rects = 0;
-                                    self.animating = true;
-                                    self.selected_rects.clear();
-                                    self.output_revision = self.output_revision.wrapping_add(1);
-                                    self.rebuild_hit_grid();
-                                    self.error_message = Some("✓ Successfully imported algorithm output".to_string());
+                                    if let Some(tab) = self.active_algo_tab_mut() {
+                                        tab.algorithm_output = Some(output);
+                                        tab.parent_output = None;
+                                        tab.repack_output = None;
+                                        tab.visible_rects = 0;
+                                        tab.animating = true;
+                                        tab.output_revision = tab.output_revision.wrapping_add(1);
+                                        self.selected_rects.clear();
+                                        self.rebuild_hit_grid();
+                                        self.error_message = Some("✓ Successfully imported algorithm output".to_string());
+                                    }
                                 }
                                 Err(e) => {
                                     self.error_message = Some(format!("Error parsing JSON: {}", e));
@@ -305,7 +348,7 @@ impl PackingApp {
                     self.last_mouse_y = y;
 
                     if self.settings.snap_to_rectangles_enabled {
-                        if let Some(output) = &self.algorithm_output {
+                        if let Some(output) = self.active_algo_tab().and_then(|t| t.algorithm_output.as_ref()) {
                             if dragged_idx < output.placements.len() {
                                 let p = &output.placements[dragged_idx];
                                 let bin_x = p.x.into_inner() + (self.dragged_rect_offset_x / scale);
@@ -324,12 +367,15 @@ impl PackingApp {
             }
             Input::RectangleDragEnd(is_inside, intersects, new_x, new_y) => {
                 let mut height_changed = false;
-                if let Some(dragged_idx) = self.dragged_rect &&
-                    let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects) &&
-                        let Some(output) = &mut self.algorithm_output && dragged_idx < output.placements.len() {
-                                output.placements[dragged_idx].x = OrderedFloat(final_x);
-                                output.placements[dragged_idx].y = OrderedFloat(final_y);
-                                height_changed = self.recalculate_bin_height();
+                if let Some(dragged_idx) = self.dragged_rect
+                    && let Some((final_x, final_y)) = self.try_snap_rectangle(dragged_idx, new_x.into_inner(), new_y.into_inner(), is_inside, intersects)
+                    && let Some(tab) = self.active_algo_tab_mut()
+                    && let Some(output) = &mut tab.algorithm_output
+                    && dragged_idx < output.placements.len()
+                {
+                    output.placements[dragged_idx].x = OrderedFloat(final_x);
+                    output.placements[dragged_idx].y = OrderedFloat(final_y);
+                    height_changed = self.recalculate_bin_height();
                 }
 
                 // If height changed, clear selection regions for current tab
@@ -346,15 +392,17 @@ impl PackingApp {
                 self.snap_preview = None;
             }
             Input::Tick => {
-                if let Some(output) = &self.algorithm_output {
-                    let total = output.placements.len();
-                    if self.visible_rects < total {
-                        self.visible_rects += 1;
+                if let Some(tab) = self.active_algo_tab_mut() {
+                    if let Some(output) = &tab.algorithm_output {
+                        let total = output.placements.len();
+                        if tab.visible_rects < total {
+                            tab.visible_rects += 1;
+                        } else {
+                            tab.animating = false;
+                        }
                     } else {
-                        self.animating = false;
+                        tab.animating = false;
                     }
-                } else {
-                    self.animating = false;
                 }
             }
             Input::SnapAndAdjustHeight => {
@@ -474,11 +522,15 @@ impl PackingApp {
 
                         match result {
                             RunResult::Success { output, raw_json } => {
-                                self.algorithm_output = Some(output);
-                                self.visible_rects = 0;
-                                self.animating = true;
+                                if let Some(tab) = self.active_algo_tab_mut() {
+                                    tab.algorithm_output = Some(output);
+                                    tab.parent_output = None;
+                                    tab.repack_output = None;
+                                    tab.visible_rects = 0;
+                                    tab.animating = true;
+                                    tab.output_revision = tab.output_revision.wrapping_add(1);
+                                }
                                 self.selected_rects.clear();
-                                self.output_revision = self.output_revision.wrapping_add(1);
                                 self.rebuild_hit_grid();
                                 self.active_tab = RightPanelTab::Visualization;
                                 if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
@@ -509,7 +561,7 @@ impl PackingApp {
                     let tab_data = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id).cloned();
                     if let Some(tab) = tab_data {
                         if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
-                            if let Some(output) = &self.algorithm_output {
+                            if let Some(output) = tab.parent_output.as_ref().or(tab.algorithm_output.as_ref()) {
                                 let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
 
                                 let mut rectangles: Vec<Rectangle> = Vec::new();
@@ -548,11 +600,22 @@ impl PackingApp {
 
                                     match result {
                                         RunResult::Success { output: new_output, raw_json } => {
-                                            self.algorithm_output = Some(new_output);
-                                            self.visible_rects = 0;
-                                            self.animating = true;
+                                            let parent_snapshot = self
+                                                .active_algo_tab()
+                                                .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
+                                                let composed_output = parent_snapshot
+                                                    .as_ref()
+                                                    .map(|parent| self.compose_repack_output(parent, &new_output, &selected_indices, inherited_region))
+                                                    .unwrap_or_else(|| new_output.clone());
+
+                                            if let Some(tab) = self.active_algo_tab_mut() {
+                                                tab.repack_output = Some(new_output);
+                                                tab.algorithm_output = Some(composed_output);
+                                                tab.visible_rects = 0;
+                                                tab.animating = true;
+                                                tab.output_revision = tab.output_revision.wrapping_add(1);
+                                            }
                                             self.selected_rects.clear();
-                                            self.output_revision = self.output_revision.wrapping_add(1);
                                             self.rebuild_hit_grid();
                                             self.active_tab = RightPanelTab::Visualization;
                                             if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
@@ -896,7 +959,13 @@ impl PackingApp {
                             selected_indices: Vec::new(),
                         };
 
-                        // New tab inherits parent's code
+                        // New tab inherits parent's code and visualization
+                        let (parent_output, parent_revision, parent_visible, parent_animating) = if let Some(parent_tab) = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id) {
+                            (parent_tab.algorithm_output.clone(), parent_tab.output_revision, parent_tab.visible_rects, parent_tab.animating)
+                        } else {
+                            (None, 0, 0, false)
+                        };
+
                         self.algo_tabs.push(AlgoTab {
                             id: tab_id,
                             name: new_name,
@@ -904,6 +973,13 @@ impl PackingApp {
                             selection_regions: vec![inherited_region],
                             code: new_code,
                             last_right_panel_tab: RightPanelTab::Visualization,
+                            algorithm_output: parent_output.clone(),
+                            parent_output,
+                            repack_output: None,
+                            output_revision: parent_revision,
+                            hit_grid: None,
+                            visible_rects: parent_visible,
+                            animating: parent_animating,
                         });
 
                     self.algo_tabs[tab_idx].selection_regions.remove(region_idx);
@@ -923,7 +999,7 @@ impl PackingApp {
 
         let mut subscriptions = vec![];
 
-        if self.animating {
+        if self.active_algo_tab().map(|t| t.animating).unwrap_or(false) {
             subscriptions.push(
                 time::every(Duration::from_millis(self.animation_speed as u64)).map(|_| Input::Tick)
             );
@@ -957,7 +1033,7 @@ fn try_snap_rectangle(
     const EDGE_SNAP_THRESHOLD: f32 = 10.0; 
     const VERTICAL_SNAP_THRESHOLD: f32 = 12.0;
 
-    let output = self.algorithm_output.as_ref()?;
+    let output = self.active_algo_tab().and_then(|t| t.algorithm_output.as_ref())?;
     if rect_idx >= output.placements.len() {
         return None;
     }
@@ -1040,7 +1116,7 @@ fn snap_to_rectangles(
 ) -> (f32, f32) {
     const HEIGHT_EPS: f32 = 1e-3;
 
-    let output = match &self.algorithm_output {
+    let output = match self.active_algo_tab().and_then(|t| t.algorithm_output.as_ref()) {
         Some(o) => o,
         None => return (new_x, new_y),
     };
@@ -1301,21 +1377,27 @@ fn snap_to_rectangles(
 
     /// Recalculates bin height and returns true if height changed
     fn recalculate_bin_height(&mut self) -> bool {
-        let height_changed = if let Some(output) = &mut self.algorithm_output {
-            let old_height = output.total_height;
-            let mut max_height = OrderedFloat(0.0);
-            for placement in &output.placements {
-                let top = placement.y + placement.height as f32;
-                if top > max_height {
-                    max_height = top;
+        let height_changed = if let Some(tab) = self.active_algo_tab_mut() {
+            if let Some(output) = &mut tab.algorithm_output {
+                let old_height = output.total_height;
+                let mut max_height = OrderedFloat(0.0);
+                for placement in &output.placements {
+                    let top = placement.y + placement.height as f32;
+                    if top > max_height {
+                        max_height = top;
+                    }
                 }
+                output.total_height = max_height.into_inner();
+                (output.total_height - old_height).abs() > 0.001
+            } else {
+                false
             }
-            output.total_height = max_height.into_inner();
-            (output.total_height - old_height).abs() > 0.001
         } else {
             false
         };
-        self.output_revision = self.output_revision.wrapping_add(1);
+        if let Some(tab) = self.active_algo_tab_mut() {
+            tab.output_revision = tab.output_revision.wrapping_add(1);
+        }
         self.rebuild_hit_grid();
         height_changed
     }
@@ -1337,8 +1419,11 @@ fn snap_to_rectangles(
     fn rebuild_hit_grid(&mut self) {
         use crate::types::HitGrid;
 
-        let Some(output) = &self.algorithm_output else {
-            self.hit_grid = None;
+        let Some(tab) = self.active_algo_tab_mut() else {
+            return;
+        };
+        let Some(output) = &tab.algorithm_output else {
+            tab.hit_grid = None;
             return;
         };
 
@@ -1368,12 +1453,111 @@ fn snap_to_rectangles(
             }
         }
 
-        self.hit_grid = Some(HitGrid {
+        tab.hit_grid = Some(HitGrid {
             cell_size,
             cols,
             rows,
             cells,
         });
+    }
+
+    fn active_algo_tab(&self) -> Option<&AlgoTab> {
+        self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id)
+    }
+
+    fn active_algo_tab_mut(&mut self) -> Option<&mut AlgoTab> {
+        self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id)
+    }
+
+    fn compose_repack_output(
+        &self,
+        parent_output: &AlgorithmOutput,
+        repack_output: &AlgorithmOutput,
+        selected_indices: &[usize],
+        region: &SelectionRegion,
+    ) -> AlgorithmOutput {
+        let mut placements = parent_output.placements.clone();
+        let offset_x = region.bin_x;
+        let offset_y = region.bin_y;
+        if repack_output.placements.len() == selected_indices.len() {
+            for (src_idx, &target_idx) in selected_indices.iter().enumerate() {
+                if target_idx < placements.len() {
+                    let mut placement = repack_output.placements[src_idx].clone();
+                    placement.x = OrderedFloat(placement.x.into_inner() + offset_x);
+                    placement.y = OrderedFloat(placement.y.into_inner() + offset_y);
+                    let max_x = parent_output.bin_width as f32 - placement.width as f32;
+                    if max_x.is_finite() {
+                        let clamped_x = placement.x.into_inner().clamp(0.0, max_x.max(0.0));
+                        placement.x = OrderedFloat(clamped_x);
+                    }
+                    placements[target_idx] = placement;
+                }
+            }
+        } else {
+            return repack_output.clone();
+        }
+
+        self.gravity_collapse(parent_output.bin_width as f32, &mut placements);
+
+        let mut max_height = 0.0_f32;
+        for placement in &placements {
+            let top = placement.y.into_inner() + placement.height as f32;
+            if top > max_height {
+                max_height = top;
+            }
+        }
+
+        AlgorithmOutput {
+            bin_width: parent_output.bin_width,
+            total_height: max_height,
+            placements,
+        }
+    }
+
+    fn gravity_collapse(&self, bin_width: f32, placements: &mut [Placement]) {
+        let mut order: Vec<usize> = (0..placements.len()).collect();
+        order.sort_by(|&a, &b| {
+            let ay = placements[a].y.into_inner();
+            let by = placements[b].y.into_inner();
+            ay.partial_cmp(&by)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let ax = placements[a].x.into_inner();
+                    let bx = placements[b].x.into_inner();
+                    ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+
+        for &idx in &order {
+            let rect_w = placements[idx].width as f32;
+            let rect_h = placements[idx].height as f32;
+            let mut x = placements[idx].x.into_inner();
+            if bin_width.is_finite() {
+                x = x.clamp(0.0, (bin_width - rect_w).max(0.0));
+            }
+
+            let mut support_y = 0.0_f32;
+            for &j in &order {
+                if j == idx {
+                    continue;
+                }
+                let jx = placements[j].x.into_inner();
+                let jy = placements[j].y.into_inner();
+                let jw = placements[j].width as f32;
+                let jh = placements[j].height as f32;
+
+                let overlap_x = x < jx + jw && x + rect_w > jx;
+                if overlap_x {
+                    let top = jy + jh;
+                    if top <= placements[idx].y.into_inner() {
+                        support_y = support_y.max(top);
+                    }
+                }
+            }
+
+            placements[idx].x = OrderedFloat(x);
+            placements[idx].y = OrderedFloat(support_y);
+        }
     }
 
     fn set_active_algo_tab(&mut self, tab_id: u64) {
@@ -1397,6 +1581,9 @@ fn snap_to_rectangles(
                 self.selected_rects.insert(*idx);
             }
             self.active_tab = new_tab.last_right_panel_tab;
+            if new_tab.algorithm_output.is_some() {
+                self.rebuild_hit_grid();
+            }
         } else {
             self.selected_rects.clear();
         }
@@ -2124,13 +2311,13 @@ let current_tab_regions: &[SelectionRegion] = self.algo_tabs.iter()
     .map(|t| t.selection_regions.as_slice())
     .unwrap_or(&[]);
 
-let visualization_content = if let Some(output) = &self.algorithm_output {
+let visualization_content = if let Some(tab) = self.active_algo_tab() && let Some(output) = &tab.algorithm_output {
     let canvas = Canvas::new(BinCanvas {
             output,
-            output_revision: self.output_revision,
-            hit_grid: self.hit_grid.as_ref(),
+            output_revision: tab.output_revision,
+            hit_grid: tab.hit_grid.as_ref(),
             zoom: self.zoom,
-            visible_count: self.visible_rects,
+            visible_count: tab.visible_rects,
             pan_x: self.pan_x,
             pan_y: self.pan_y,
             hovered_rect: self.hovered_rect,
@@ -2139,7 +2326,7 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             dragged_rect_offset_x: self.dragged_rect_offset_x,
             dragged_rect_offset_y: self.dragged_rect_offset_y,
             snap_preview: self.snap_preview,
-            animating: self.animating,
+            animating: tab.animating,
             selected_rects: &self.selected_rects,
             is_area_selecting: self.is_area_selecting,
             area_select_start: self.area_select_start,
@@ -2381,8 +2568,8 @@ let visualization_content = if let Some(output) = &self.algorithm_output {
             .height(Length::Fill)
         };
         
-        let stats_display = if let Some(output) = &self.algorithm_output {
-            let rect_count_text = text(format!("Rectangles: {}/{}", self.visible_rects, output.placements.len()))
+        let stats_display = if let Some(tab) = self.active_algo_tab() && let Some(output) = &tab.algorithm_output {
+            let rect_count_text = text(format!("Rectangles: {}/{}", tab.visible_rects, output.placements.len()))
                 .size(11)
                 .font(ui_font)
                 .style(|_theme: &Theme| {
