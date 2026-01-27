@@ -75,6 +75,7 @@ pub enum Input {
     RectangleDragEnd(bool, bool, OrderedFloat<f32>, OrderedFloat<f32>),
     SnapAndAdjustHeight,
     RightClickCanvas(Option<usize>),
+    LeftClickCanvas(),
     TabSelected(RightPanelTab),
     AlgoTabSelected(u64),
     RemoveAlgoTab(u64),
@@ -139,6 +140,7 @@ pub struct AlgoTab {
     pub selected_indices: Vec<usize>,
     pub selection_regions: Vec<SelectionRegion>,
     pub code: String,
+    pub last_right_panel_tab: RightPanelTab,
 }
 
 #[derive(Debug, Clone)]

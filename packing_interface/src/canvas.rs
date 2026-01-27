@@ -393,10 +393,8 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         let local_y = position.y - bounds.y;
                         (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, local_x, local_y)))
                     } else if self.hovered_rect.is_some() {
-                        // Clicking on a rectangle - toggle selection
                         (canvas::event::Status::Captured, Some(Input::RightClickCanvas(self.hovered_rect)))
                     } else if self.settings.area_select_enabled {
-                        // Only start area selection if click is INSIDE the bin rectangle
                         let local_x = position.x - bounds.x;
                         let local_y = position.y - bounds.y;
                         let bin_rect = iced::Rectangle {
@@ -408,10 +406,10 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         if bin_rect.contains(Point::new(local_x, local_y)) {
                             (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
                         } else {
-                            (canvas::event::Status::Ignored, None)
+                            (canvas::event::Status::Captured, Some(Input::HideContextMenu))
                         }
                     } else {
-                        (canvas::event::Status::Ignored, None)
+                        (canvas::event::Status::Captured, Some(Input::HideContextMenu))
                     }
                 } else {
                     (canvas::event::Status::Ignored, None)
@@ -508,7 +506,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         return (canvas::event::Status::Captured, Some(Input::RectangleDragStart(rect_idx, position.x, position.y)));
                     }
                         
-                        (canvas::event::Status::Ignored, None)
+                        (canvas::event::Status::Captured, Some(Input::HideContextMenu))
                     }
                 } else {
                     (canvas::event::Status::Ignored, None)

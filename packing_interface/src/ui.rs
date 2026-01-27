@@ -75,6 +75,7 @@ impl Default for PackingApp {
                 selected_indices: Vec::new(),
                 selection_regions: Vec::new(),
                 code: ROOT_CODE.to_string(),
+                last_right_panel_tab: RightPanelTab::Visualization,
             }],
             active_algo_tab_id: 0,
             next_algo_tab_id: 1,
@@ -291,6 +292,8 @@ impl PackingApp {
                 self.dragged_rect_offset_x = 0.0;
                 self.dragged_rect_offset_y = 0.0;
                 self.snap_preview = None;
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
             }
             Input::RectangleDragMove(x, y, scale) => {
                 if let Some(dragged_idx) = self.dragged_rect {
@@ -358,6 +361,8 @@ impl PackingApp {
                 self.recalculate_bin_height();
             }
             Input::RightClickCanvas(clicked_rect) => {
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
                 if let Some(idx) = clicked_rect {
                     if !self.selected_rects.contains(&idx) {
                         self.selected_rects.insert(idx);
@@ -369,8 +374,15 @@ impl PackingApp {
                     }
                 }
             }
+            Input::LeftClickCanvas() => {
+                self.context_menu_visible = false;
+                self.context_menu_region = None;
+            }
             Input::TabSelected(tab) => {
                 self.active_tab = tab;
+                if let Some(current_tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                    current_tab.last_right_panel_tab = tab;
+                }
             }
             Input::AlgoTabSelected(tab_id) => {
                 self.set_active_algo_tab(tab_id);
@@ -469,6 +481,9 @@ impl PackingApp {
                                 self.output_revision = self.output_revision.wrapping_add(1);
                                 self.rebuild_hit_grid();
                                 self.active_tab = RightPanelTab::Visualization;
+                                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                                    tab.last_right_panel_tab = self.active_tab;
+                                }
                                 self.error_message = Some("✓ Code executed successfully".to_string());
                                 self.code_output_json = Some(raw_json);
                                 self.code_errors.clear();
@@ -540,6 +555,9 @@ impl PackingApp {
                                             self.output_revision = self.output_revision.wrapping_add(1);
                                             self.rebuild_hit_grid();
                                             self.active_tab = RightPanelTab::Visualization;
+                                            if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                                                tab.last_right_panel_tab = self.active_tab;
+                                            }
                                             self.error_message = Some("✓ Code executed successfully".to_string());
                                             self.code_output_json = Some(raw_json);
                                             self.code_errors.clear();
@@ -554,7 +572,7 @@ impl PackingApp {
                                         }
                                     }
                                 } else {
-                                    self.error_message = Some("Select at least one rectangle inside the region.".to_string());
+                                    self.error_message = Some("Select at least one rectangle to repack.".to_string());
                                 }
                             }
                         } else {
@@ -869,29 +887,23 @@ impl PackingApp {
                         let tab_id = self.next_algo_tab_id;
                         self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
 
-                        let selected_indices = if let Some(output) = &self.algorithm_output {
-                            let (selected_indices, _) = self.split_region_rectangles(output, &region);
-                            selected_indices
-                        } else {
-                            Vec::new()
-                        };
-
                         let inherited_region = SelectionRegion {
                             is_inherited: true,
                             bin_x: region.bin_x,
                             bin_y: region.bin_y,
                             bin_w: region.bin_w,
                             bin_h: region.bin_h,
-                            selected_indices: selected_indices.clone(),
+                            selected_indices: Vec::new(),
                         };
 
                         // New tab inherits parent's code
                         self.algo_tabs.push(AlgoTab {
                             id: tab_id,
                             name: new_name,
-                            selected_indices,
+                            selected_indices: Vec::new(),
                             selection_regions: vec![inherited_region],
                             code: new_code,
+                            last_right_panel_tab: RightPanelTab::Visualization,
                         });
 
                     self.algo_tabs[tab_idx].selection_regions.remove(region_idx);
@@ -1369,6 +1381,7 @@ fn snap_to_rectangles(
         let current_code = self.code_editor_content.text();
         if let Some(current_tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
             current_tab.code = current_code;
+            current_tab.last_right_panel_tab = self.active_tab;
         }
 
         self.active_algo_tab_id = tab_id;
@@ -1383,6 +1396,7 @@ fn snap_to_rectangles(
             for idx in &new_tab.selected_indices {
                 self.selected_rects.insert(*idx);
             }
+            self.active_tab = new_tab.last_right_panel_tab;
         } else {
             self.selected_rects.clear();
         }
@@ -1407,7 +1421,18 @@ fn snap_to_rectangles(
         let region_min_y = region.bin_y;
         let region_max_y = region.bin_y + region.bin_h;
 
+        for &idx in &self.selected_rects {
+            if idx < output.placements.len() {
+                selected.push(idx);
+            }
+        }
+        selected.sort_unstable();
+
         for (idx, p) in output.placements.iter().enumerate() {
+            if self.selected_rects.contains(&idx) {
+                continue;
+            }
+
             let rect_min_x = p.x.into_inner();
             let rect_max_x = rect_min_x + p.width as f32;
             let rect_min_y = p.y.into_inner();
@@ -1419,11 +1444,7 @@ fn snap_to_rectangles(
                 && rect_min_y <= region_max_y;
 
             if intersects {
-                if self.selected_rects.contains(&idx) {
-                    selected.push(idx);
-                } else {
-                    non_selected.push(idx);
-                }
+                non_selected.push(idx);
             }
         }
 
