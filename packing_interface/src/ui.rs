@@ -17,14 +17,7 @@ from typing import List, Tuple
 
 class Packing:
     def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
-        items = []
-        for item in rectangles:
-            w, h, q = item
-            for _ in range(q):
-                items.append({
-                    "width": w,
-                    "height": h
-                })
+        items = packing_lib.expand_items(rectangles)
 
         placements = []
         total_height = 0
@@ -46,20 +39,20 @@ from typing import List, Tuple
 
 class Repacking:
     def solve(self, bin_height: int, bin_width: int, rectangles: List[Tuple[int, int, int]], non_empty_space: List[Tuple[int, int]]) -> List[Tuple[float, float, int, int]]:
-        items = []
-        for item in rectangles:
-            w, h, q = item
-            for _ in range(q):
-                items.append({
-                    "width": w,
-                    "height": h
-                })
+        items = packing_lib.expand_items(rectangles)
 
-        items.sort(key=lambda x: -x["height"])
+        items = packing_lib.sort_by_height(items)
 
         levels = []
         placements = []
         current_y = 0
+
+        def intersects_obstacle(x, y, w, h):
+            for o in non_empty_space:
+                ox1, ox2, oy1, oy2 = o["x_1"], o["x_2"], o["y_1"], o["y_2"]
+                if x < ox2 and x + w > ox1 and y < oy2 and y + h > oy1:
+                    return True
+            return False
 
         for rect in items:
             w = rect["width"]
@@ -71,24 +64,29 @@ class Repacking:
                 if level["used_width"] + w <= bin_width:
                     x = level["used_width"]
                     y = level["y"]
-
-                    placements.append([x, y, w, h])
-                    level["used_width"] += w
-                    placed = True
-                    break
+                    if not intersects_obstacle(x, y, w, h):
+                        placements.append([x, y, w, h])
+                        level["used_width"] += w
+                        placed = True
+                        break
 
             if not placed:
+                # Find next y that doesn't collide with obstacles
+                y = current_y
+                while y < bin_height and intersects_obstacle(0, y, w, h):
+                    y += 1
                 new_level = {
                     "height": h,
                     "used_width": w,
-                    "y": current_y
+                    "y": y
                 }
                 levels.append(new_level)
 
-                placements.append([0, current_y, w, h])
-                current_y += h
+                placements.append([0, y, w, h])
+                current_y = y + h
 
         total_height = sum(level["height"] for level in levels)
+
         return packing_lib.make_output(bin_width, total_height, placements)
 "#;
 
@@ -107,6 +105,8 @@ impl Default for PackingApp {
                 id: 0,
                 name: "Root".to_string(),
                 selected_indices: Vec::new(),
+                repacked_indices: Vec::new(),
+                obstacle_spaces: Vec::new(),
                 selection_regions: Vec::new(),
                 code: ROOT_CODE.to_string(),
                 last_right_panel_tab: RightPanelTab::Visualization,
@@ -145,6 +145,7 @@ impl Default for PackingApp {
             settings: Settings {
                 area_select_enabled: true,
                 snap_to_rectangles_enabled: true,
+                auto_minimize_height: false,
             },
             settings_panel_visible: false,
             area_select_list: Vec::new(),
@@ -235,6 +236,8 @@ impl PackingApp {
                                         tab.algorithm_output = Some(output);
                                         tab.parent_output = None;
                                         tab.repack_output = None;
+                                        tab.repacked_indices.clear();
+                                        tab.obstacle_spaces.clear();
                                         tab.visible_rects = 0;
                                         tab.animating = true;
                                         tab.output_revision = tab.output_revision.wrapping_add(1);
@@ -526,9 +529,14 @@ impl PackingApp {
                                     tab.algorithm_output = Some(output);
                                     tab.parent_output = None;
                                     tab.repack_output = None;
+                                    tab.repacked_indices.clear();
+                                    tab.obstacle_spaces.clear();
                                     tab.visible_rects = 0;
                                     tab.animating = true;
                                     tab.output_revision = tab.output_revision.wrapping_add(1);
+                                }
+                                if self.settings.auto_minimize_height {
+                                    self.apply_auto_minimize_height();
                                 }
                                 self.selected_rects.clear();
                                 self.rebuild_hit_grid();
@@ -563,27 +571,81 @@ impl PackingApp {
                         if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
                             if let Some(output) = tab.parent_output.as_ref().or(tab.algorithm_output.as_ref()) {
                                 let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
+                                eprintln!(
+                                    "Repack region: x={} y={} w={} h={} selected={} non_selected={}",
+                                    inherited_region.bin_x,
+                                    inherited_region.bin_y,
+                                    inherited_region.bin_w,
+                                    inherited_region.bin_h,
+                                    selected_indices.len(),
+                                    non_selected_indices.len()
+                                );
+                                eprintln!("Selected indices: {:?}", selected_indices);
+                                eprintln!("Non-selected indices: {:?}", non_selected_indices);
 
                                 let mut rectangles: Vec<Rectangle> = Vec::new();
                                 for &idx in &selected_indices {
                                     let p = &output.placements[idx];
                                     rectangles.push(Rectangle { width: p.width, height: p.height, quantity: 1 });
+                                    eprintln!(
+                                        "Selected rect idx {} -> x={} y={} w={} h={}",
+                                        idx,
+                                        p.x.into_inner(),
+                                        p.y.into_inner(),
+                                        p.width,
+                                        p.height
+                                    );
                                 }
 
                                 let mut non_empty_space: Vec<NonEmptySpace> = Vec::new();
+                                let mut obstacle_spaces: Vec<NonEmptySpace> = Vec::new();
                                 for &idx in &non_selected_indices {
                                     let p = &output.placements[idx];
-                                    let x_1 = p.x.into_inner();
-                                    let y_1 = p.y.into_inner();
-                                    let x_2 = x_1 + p.width as f32;
-                                    let y_2 = y_1 + p.height as f32;
-                                    non_empty_space.push(NonEmptySpace { x_1, x_2, y_1, y_2 });
+                                    eprintln!(
+                                        "Obstacle rect idx {} -> x={} y={} w={} h={}",
+                                        idx,
+                                        p.x.into_inner(),
+                                        p.y.into_inner(),
+                                        p.width,
+                                        p.height
+                                    );
+                                    let rect_x1 = p.x.into_inner();
+                                    let rect_y1 = p.y.into_inner();
+                                    let rect_x2 = rect_x1 + p.width as f32;
+                                    let rect_y2 = rect_y1 + p.height as f32;
+
+                                    let region_x1 = inherited_region.bin_x;
+                                    let region_y1 = inherited_region.bin_y;
+                                    let region_x2 = inherited_region.bin_x + inherited_region.bin_w;
+                                    let region_y2 = inherited_region.bin_y + inherited_region.bin_h;
+
+                                    let inter_x1 = rect_x1.max(region_x1);
+                                    let inter_y1 = rect_y1.max(region_y1);
+                                    let inter_x2 = rect_x2.min(region_x2);
+                                    let inter_y2 = rect_y2.min(region_y2);
+
+                                    if inter_x2 > inter_x1 && inter_y2 > inter_y1 {
+                                        let space = NonEmptySpace {
+                                            x_1: inter_x1 - region_x1,
+                                            y_1: inter_y1 - region_y1,
+                                            x_2: inter_x2 - region_x1,
+                                            y_2: inter_y2 - region_y1,
+                                        };
+                                        eprintln!("Obstacle region-local idx {} -> {:?}", idx, space);
+                                        non_empty_space.push(space);
+                                        obstacle_spaces.push(NonEmptySpace {
+                                            x_1: inter_x1,
+                                            y_1: inter_y1,
+                                            x_2: inter_x2,
+                                            y_2: inter_y2,
+                                        });
+                                    }
                                 }
 
                                 if !rectangles.is_empty() {
                                     let user_code = self.code_editor_content.text();
                                     let temp_testcase = JsonInput {
-                                        width_of_bin: output.bin_width,
+                                        width_of_bin: inherited_region.bin_w.max(0.0) as i32,
                                         number_of_rectangles: rectangles.len(),
                                         number_of_types_of_rectangles: rectangles.len(),
                                         autofill_option: false,
@@ -594,26 +656,47 @@ impl PackingApp {
                                         self.selected_language,
                                         &user_code,
                                         &temp_testcase,
-                                        output.total_height,
+                                        inherited_region.bin_h.max(0.0),
                                         &non_empty_space,
                                     );
 
                                     match result {
                                         RunResult::Success { output: new_output, raw_json } => {
+                                            eprintln!(
+                                                "Repack output: bin_width={} total_height={} placements={}",
+                                                new_output.bin_width,
+                                                new_output.total_height,
+                                                new_output.placements.len()
+                                            );
+                                            for (i, p) in new_output.placements.iter().enumerate() {
+                                                eprintln!(
+                                                    "Repacked rect {} -> x={} y={} w={} h={}",
+                                                    i,
+                                                    p.x.into_inner(),
+                                                    p.y.into_inner(),
+                                                    p.width,
+                                                    p.height
+                                                );
+                                            }
                                             let parent_snapshot = self
                                                 .active_algo_tab()
                                                 .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
-                                                let composed_output = parent_snapshot
-                                                    .as_ref()
+                                            let composed_output = parent_snapshot
+                                                .as_ref()
                                                     .map(|parent| self.compose_repack_output(parent, &new_output, &selected_indices, inherited_region))
                                                     .unwrap_or_else(|| new_output.clone());
 
                                             if let Some(tab) = self.active_algo_tab_mut() {
                                                 tab.repack_output = Some(new_output);
                                                 tab.algorithm_output = Some(composed_output);
+                                                tab.repacked_indices = selected_indices.clone();
+                                                tab.obstacle_spaces = obstacle_spaces.clone();
                                                 tab.visible_rects = 0;
                                                 tab.animating = true;
                                                 tab.output_revision = tab.output_revision.wrapping_add(1);
+                                            }
+                                            if self.settings.auto_minimize_height {
+                                                self.apply_auto_minimize_height();
                                             }
                                             self.selected_rects.clear();
                                             self.rebuild_hit_grid();
@@ -764,6 +847,12 @@ impl PackingApp {
             }
             Input::ToggleSnapToRectangles(enabled) => {
                 self.settings.snap_to_rectangles_enabled = enabled;
+            }
+            Input::ToggleAutoMinimizeHeight(enabled) => {
+                self.settings.auto_minimize_height = enabled;
+                if enabled {
+                    self.apply_auto_minimize_height();
+                }
             }
             Input::ToggleSettingsPanel => {
                 self.settings_panel_visible = !self.settings_panel_visible;
@@ -970,6 +1059,8 @@ impl PackingApp {
                             id: tab_id,
                             name: new_name,
                             selected_indices: Vec::new(),
+                            repacked_indices: Vec::new(),
+                            obstacle_spaces: Vec::new(),
                             selection_regions: vec![inherited_region],
                             code: new_code,
                             last_right_panel_tab: RightPanelTab::Visualization,
@@ -1485,11 +1576,12 @@ fn snap_to_rectangles(
                     let mut placement = repack_output.placements[src_idx].clone();
                     placement.x = OrderedFloat(placement.x.into_inner() + offset_x);
                     placement.y = OrderedFloat(placement.y.into_inner() + offset_y);
-                    let max_x = parent_output.bin_width as f32 - placement.width as f32;
-                    if max_x.is_finite() {
-                        let clamped_x = placement.x.into_inner().clamp(0.0, max_x.max(0.0));
-                        placement.x = OrderedFloat(clamped_x);
-                    }
+                    let max_x = (offset_x + region.bin_w) - placement.width as f32;
+                    let max_y = (offset_y + region.bin_h) - placement.height as f32;
+                    let clamped_x = placement.x.into_inner().clamp(offset_x, max_x.max(offset_x));
+                    let clamped_y = placement.y.into_inner().clamp(offset_y, max_y.max(offset_y));
+                    placement.x = OrderedFloat(clamped_x);
+                    placement.y = OrderedFloat(clamped_y);
                     placements[target_idx] = placement;
                 }
             }
@@ -1497,7 +1589,9 @@ fn snap_to_rectangles(
             return repack_output.clone();
         }
 
-        self.gravity_collapse(parent_output.bin_width as f32, &mut placements);
+        if self.settings.auto_minimize_height {
+            Self::gravity_collapse(parent_output.bin_width as f32, &mut placements);
+        }
 
         let mut max_height = 0.0_f32;
         for placement in &placements {
@@ -1514,7 +1608,7 @@ fn snap_to_rectangles(
         }
     }
 
-    fn gravity_collapse(&self, bin_width: f32, placements: &mut [Placement]) {
+    fn gravity_collapse(bin_width: f32, placements: &mut [Placement]) {
         let mut order: Vec<usize> = (0..placements.len()).collect();
         order.sort_by(|&a, &b| {
             let ay = placements[a].y.into_inner();
@@ -1528,6 +1622,7 @@ fn snap_to_rectangles(
                 })
         });
 
+        let mut placed = vec![false; placements.len()];
         for &idx in &order {
             let rect_w = placements[idx].width as f32;
             let rect_h = placements[idx].height as f32;
@@ -1538,7 +1633,7 @@ fn snap_to_rectangles(
 
             let mut support_y = 0.0_f32;
             for &j in &order {
-                if j == idx {
+                if !placed[j] || j == idx {
                     continue;
                 }
                 let jx = placements[j].x.into_inner();
@@ -1548,15 +1643,30 @@ fn snap_to_rectangles(
 
                 let overlap_x = x < jx + jw && x + rect_w > jx;
                 if overlap_x {
-                    let top = jy + jh;
-                    if top <= placements[idx].y.into_inner() {
-                        support_y = support_y.max(top);
-                    }
+                    support_y = support_y.max(jy + jh);
                 }
             }
 
             placements[idx].x = OrderedFloat(x);
             placements[idx].y = OrderedFloat(support_y);
+            placed[idx] = true;
+        }
+    }
+
+    fn apply_auto_minimize_height(&mut self) {
+        if let Some(tab) = self.active_algo_tab_mut() && let Some(output) = &mut tab.algorithm_output {
+            let bin_width = output.bin_width as f32;
+            Self::gravity_collapse(bin_width, &mut output.placements);
+            let mut max_height = 0.0_f32;
+            for placement in &output.placements {
+                let top = placement.y.into_inner() + placement.height as f32;
+                if top > max_height {
+                    max_height = top;
+                }
+            }
+            output.total_height = max_height;
+            tab.output_revision = tab.output_revision.wrapping_add(1);
+            self.rebuild_hit_grid();
         }
     }
 
@@ -2250,6 +2360,7 @@ fn snap_to_rectangles(
 
         let area_select_enabled = self.settings.area_select_enabled;
         let snap_to_rects_enabled = self.settings.snap_to_rectangles_enabled;
+        let auto_minimize_enabled = self.settings.auto_minimize_height;
 
         let settings_popup: Element<'_, Input> = if self.settings_panel_visible {
             let area_select_checkbox = checkbox("Area Selection (Right-drag)", area_select_enabled)
@@ -2260,6 +2371,12 @@ fn snap_to_rectangles(
 
             let snap_checkbox = checkbox("Snap to Edge", snap_to_rects_enabled)
                 .on_toggle(Input::ToggleSnapToRectangles)
+                .size(14)
+                .font(ui_font)
+                .text_size(11);
+
+            let auto_minimize_checkbox = checkbox("Auto Minimize Height", auto_minimize_enabled)
+                .on_toggle(Input::ToggleAutoMinimizeHeight)
                 .size(14)
                 .font(ui_font)
                 .text_size(11);
@@ -2275,6 +2392,8 @@ fn snap_to_rectangles(
                     area_select_checkbox,
                     column![].height(4),
                     snap_checkbox,
+                    column![].height(4),
+                    auto_minimize_checkbox,
                 ]
                 .spacing(4)
             )
@@ -2328,6 +2447,8 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             snap_preview: self.snap_preview,
             animating: tab.animating,
             selected_rects: &self.selected_rects,
+            repacked_indices: Some(tab.repacked_indices.as_slice()),
+            obstacle_spaces: Some(tab.obstacle_spaces.as_slice()),
             is_area_selecting: self.is_area_selecting,
             area_select_start: self.area_select_start,
             area_select_current: self.area_select_current,

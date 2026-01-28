@@ -7,6 +7,7 @@ use ordered_float::OrderedFloat;
 pub struct Settings {
     pub area_select_enabled: bool,
     pub snap_to_rectangles_enabled: bool,
+    pub auto_minimize_height: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +95,7 @@ pub enum Input {
     // Settings inputs
     ToggleAreaSelectEnabled(bool),
     ToggleSnapToRectangles(bool),
+    ToggleAutoMinimizeHeight(bool),
     ToggleSettingsPanel,
     // Area selection inputs
     AreaSelectStart(f32, f32),
@@ -138,6 +140,8 @@ pub struct AlgoTab {
     pub id: u64,
     pub name: String,
     pub selected_indices: Vec<usize>,
+    pub repacked_indices: Vec<usize>,
+    pub obstacle_spaces: Vec<NonEmptySpace>,
     pub selection_regions: Vec<SelectionRegion>,
     pub code: String,
     pub last_right_panel_tab: RightPanelTab,
@@ -235,6 +239,8 @@ pub struct BinCanvas<'a>  {
     pub snap_preview: Option<(f32, f32)>,  // (x, y) in bin coordinates
     pub animating: bool,
     pub selected_rects: &'a HashSet<usize>,
+    pub repacked_indices: Option<&'a [usize]>,
+    pub obstacle_spaces: Option<&'a [NonEmptySpace]>,
     pub is_area_selecting: bool,
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,

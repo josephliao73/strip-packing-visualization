@@ -2,7 +2,7 @@ use iced::widget::canvas::{self};
 use iced::widget::canvas::event::Event;
 use iced::mouse;
 use iced::{Color};
-use crate::types::{Input, BinCanvas, HitGrid};
+use crate::types::{Input, BinCanvas, HitGrid, Placement};
 use iced::widget::canvas::{Frame, Path, Stroke, Fill};
 use iced::{Point, Size};
 use std::cell::Cell;
@@ -116,6 +116,8 @@ pub struct CanvasState {
     base_cache: canvas::Cache,
     last_key: Cell<Option<CacheKey>>,
     last_hover_time: Option<Instant>,
+    last_left_click_time: Option<Instant>,
+    last_left_click_rect: Option<usize>,
 }
 
 impl Default for CanvasState {
@@ -124,6 +126,8 @@ impl Default for CanvasState {
             base_cache: canvas::Cache::new(),
             last_key: Cell::new(None),
             last_hover_time: None,
+            last_left_click_time: None,
+            last_left_click_rect: None,
         }
     }
 }
@@ -187,26 +191,40 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                 .with_width(2.0));
 
             let stroke_border = Stroke::default().with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.4)).with_width(1.0);
+            let repacked = self.repacked_indices.unwrap_or(&[]);
 
-            for (idx, p) in self.output.placements.iter().enumerate().take(count) {
-                if self.dragged_rect == Some(idx) {
-                    continue;
-                }
-
+            let draw_rect = |frame: &mut Frame, p: &Placement| {
                 let w = p.width as f32 * scale;
                 let h = p.height as f32 * scale;
                 let x_px = origin_x + p.x.into_inner() * scale;
                 let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
 
                 if x_px + w < 0.0 || x_px > bounds.width || y_px + h < 0.0 || y_px > bounds.height {
-                    continue;
+                    return;
                 }
 
                 let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
                 let color = color_from_dimensions(p.width, p.height);
                 frame.fill(&rect_path, Fill::from(color));
                 frame.stroke(&rect_path, stroke_border.clone());
+            };
+
+            for (idx, p) in self.output.placements.iter().enumerate().take(count) {
+                if self.dragged_rect == Some(idx) || repacked.contains(&idx) {
+                    continue;
+                }
+                draw_rect(frame, p);
             }
+
+            for &idx in repacked.iter() {
+                if idx >= count || self.dragged_rect == Some(idx) {
+                    continue;
+                }
+                let p = &self.output.placements[idx];
+                draw_rect(frame, p);
+            }
+
+            // Obstacle overlay removed per UX request.
         });
 
         let mut frame = Frame::new(renderer, bounds.size());
@@ -395,19 +413,7 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         let local_y = position.y - bounds.y;
                         (canvas::event::Status::Captured, Some(Input::ShowRegionContextMenu(region_idx, local_x, local_y)))
                     } else if self.settings.area_select_enabled {
-                        let local_x = position.x - bounds.x;
-                        let local_y = position.y - bounds.y;
-                        let bin_rect = iced::Rectangle {
-                            x: origin_x,
-                            y: origin_y,
-                            width: bin_w_units * scale,
-                            height: bin_h_units * scale,
-                        };
-                        if bin_rect.contains(Point::new(local_x, local_y)) {
-                            (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
-                        } else {
-                            (canvas::event::Status::Captured, Some(Input::HideContextMenu))
-                        }
+                        (canvas::event::Status::Captured, Some(Input::AreaSelectStart(position.x, position.y)))
                     } else {
                         (canvas::event::Status::Captured, Some(Input::HideContextMenu))
                     }
@@ -501,11 +507,22 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
 
                     if !bin_rect.contains(position) {
                         (canvas::event::Status::Captured, Some(Input::PanStart(position.x, position.y)))
+                    } else if let Some(rect_idx) = self.find_rectangle_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_w_units, bin_h_units) {
+                        let now = Instant::now();
+                        let is_double_click = if let Some(last) = state.last_left_click_time {
+                            state.last_left_click_rect == Some(rect_idx)
+                                && now.duration_since(last) < Duration::from_millis(300)
+                        } else {
+                            false
+                        };
+                        state.last_left_click_time = Some(now);
+                        state.last_left_click_rect = Some(rect_idx);
+
+                        if is_double_click && !self.animating {
+                            return (canvas::event::Status::Captured, Some(Input::RectangleDragStart(rect_idx, position.x, position.y)));
+                        }
+                        (canvas::event::Status::Captured, Some(Input::RightClickCanvas(Some(rect_idx))))
                     } else {
-                if !self.animating && let Some(rect_idx) = self.find_rectangle_at_point(position.x, position.y, &bounds, scale, origin_x, origin_y, bin_w_units, bin_h_units) {
-                        return (canvas::event::Status::Captured, Some(Input::RectangleDragStart(rect_idx, position.x, position.y)));
-                    }
-                        
                         (canvas::event::Status::Captured, Some(Input::HideContextMenu))
                     }
                 } else {

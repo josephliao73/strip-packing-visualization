@@ -47,6 +47,9 @@ elif repacking_class is not None and inspect.isclass(repacking_class):
     rectangles = json.loads(sys.argv[4])
     non_empty_space = json.loads(sys.argv[5])
 
+    print(f"[repack] bin_height={bin_height} bin_width={bin_width} rects={len(rectangles)} obstacles={len(non_empty_space)}", file=sys.stderr)
+    print(f"[repack] non_empty_space={non_empty_space}", file=sys.stderr)
+
     instance = repacking_class()
     out = instance.solve(bin_height, bin_width, rectangles, non_empty_space)
     print(out)

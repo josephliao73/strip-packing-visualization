@@ -10,8 +10,12 @@ def make_output(bin_width, total_height, placements):
 def expand_items(rectangle_list):
     items = []
     for item in rectangle_list:
-        for _ in range(item["quantity"]):
-            items.append({"width": item["width"], "height": item["height"]})
+        w, h, q = item
+        for _ in range(q):
+            items.append({
+                "width": w,
+                "height": h
+            })
     return items
 
 def sort_by_height(items, descending=True):

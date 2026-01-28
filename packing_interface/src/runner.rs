@@ -65,8 +65,7 @@ impl LanguageRunner for PythonRunner {
             .arg(&rectangles_str)
             .output();
 
-        let output1 = std::process::Command::new("python3").arg(&runner_path).arg(&solution_path).output();
-        println!("FU NK {:?}", &output1);
+        // Debug probe removed: this runner requires CLI args.
 
         match output {
             Ok(output) => {
@@ -133,14 +132,13 @@ impl LanguageRunner for PythonRunner {
         let output = std::process::Command::new("python3")
             .arg(&runner_path)
             .arg(&solution_path)
-            .arg(bin_height.to_string())
-            .arg(bin_width.to_string())
+            .arg((bin_height.max(0.0).round() as i32).to_string())
+            .arg((bin_width.max(0.0).round() as i32).to_string())
             .arg(&rectangles_str)
             .arg(&non_empty_space_str)
             .output();
 
-        let output1 = std::process::Command::new("python3").arg(&runner_path).arg(&solution_path).output();
-        println!("FU NK {:?}", &output1);
+        // Debug probe removed: this runner requires CLI args.
 
         match output {
             Ok(output) => {
