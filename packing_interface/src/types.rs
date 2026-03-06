@@ -21,6 +21,7 @@ pub enum BottomPanelTab {
     Problems,
     Output,
     TestCases,
+    MultipleTestCases,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,26 +84,22 @@ pub enum Input {
     CodeEditorAction(text_editor::Action),
     LanguageSelected(CodeLanguage),
     RunCode,
-    // Bottom panel inputs
     BottomPanelTabSelected(BottomPanelTab),
     ToggleBottomPanel,
     SaveOutputToFile,
-    // Keyboard input for code editor
     InsertTab,
-    // Test cases inputs
     ImportTestCase,
     GenerateTestCase,
-    // Settings inputs
+    GenerateMultipleTestCases(i32),
     ToggleAreaSelectEnabled(bool),
     ToggleSnapToRectangles(bool),
     ToggleAutoMinimizeHeight(bool),
     ToggleSettingsPanel,
-    // Area selection inputs
+    NumTestCasesChanged(String),
+    DisplayVisual(bool),
     AreaSelectStart(f32, f32),
     AreaSelectMove(f32, f32),
-    // (selected indices, bin_x, bin_y, bin_w, bin_h) - bin coordinates for the selection
     AreaSelectEnd(Vec<usize>, f32, f32, f32, f32),
-    // Selection region context menu
     ShowRegionContextMenu(usize, f32, f32),  // region index, x, y position
     HideContextMenu,
     RemoveSelectionRegion(usize),
@@ -209,6 +206,10 @@ pub struct PackingApp {
     pub context_menu_visible: bool,
     pub context_menu_region: Option<usize>,
     pub context_menu_position: (f32, f32),
+    pub num_test_cases_input: String,
+    pub display_visual: bool,
+    pub multiple_test_cases: Vec<JsonInput>,
+    pub multiple_testcase_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

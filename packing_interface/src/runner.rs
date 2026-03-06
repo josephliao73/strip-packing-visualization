@@ -65,7 +65,6 @@ impl LanguageRunner for PythonRunner {
             .arg(&rectangles_str)
             .output();
 
-        // Debug probe removed: this runner requires CLI args.
 
         match output {
             Ok(output) => {
@@ -138,7 +137,6 @@ impl LanguageRunner for PythonRunner {
             .arg(&non_empty_space_str)
             .output();
 
-        // Debug probe removed: this runner requires CLI args.
 
         match output {
             Ok(output) => {

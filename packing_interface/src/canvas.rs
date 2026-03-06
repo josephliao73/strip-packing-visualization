@@ -2,7 +2,8 @@ use iced::widget::canvas::{self};
 use iced::widget::canvas::event::Event;
 use iced::mouse;
 use iced::{Color};
-use crate::types::{Input, BinCanvas, HitGrid, Placement};
+use crate::types::{Input, BinCanvas, HitGrid, Placement, SelectionRegion};
+use std::collections::HashSet;
 use iced::widget::canvas::{Frame, Path, Stroke, Fill};
 use iced::{Point, Size};
 use std::cell::Cell;
@@ -112,9 +113,52 @@ struct CacheKey {
     dragged_rect: Option<usize>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct OverlayCacheKey {
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+    bounds_x: f32,
+    bounds_y: f32,
+    bounds_w: f32,
+    bounds_h: f32,
+    output_revision: u64,
+    visible_count: usize,
+    hovered_rect: Option<usize>,
+    dragged_rect: Option<usize>,
+    dragged_offset_x: f32,
+    dragged_offset_y: f32,
+    snap_preview: Option<(f32, f32)>,
+    is_area_selecting: bool,
+    area_start: Option<(f32, f32)>,
+    area_current: Option<(f32, f32)>,
+    selected_hash: u64,
+    regions_hash: u64,
+}
+
+fn hash_selected(selected: &HashSet<usize>) -> u64 {
+    selected.iter().fold(0u64, |acc, &x| {
+        acc ^ (x as u64).wrapping_mul(0x9e3779b97f4a7c15)
+    })
+}
+
+fn hash_regions(regions: &[SelectionRegion]) -> u64 {
+    regions.iter().enumerate().fold(0u64, |acc, (i, r)| {
+        let h = (i as u64)
+            ^ (r.bin_x.to_bits() as u64).wrapping_mul(0x9e3779b97f4a7c15)
+            ^ (r.bin_y.to_bits() as u64).wrapping_mul(0x517cc1b727220a95)
+            ^ (r.bin_w.to_bits() as u64).wrapping_mul(0xbf58476d1ce4e5b9)
+            ^ (r.bin_h.to_bits() as u64).wrapping_mul(0x94d049bb133111eb)
+            ^ if r.is_inherited { 1 } else { 0 };
+        acc ^ h
+    })
+}
+
 pub struct CanvasState {
     base_cache: canvas::Cache,
     last_key: Cell<Option<CacheKey>>,
+    overlay_cache: canvas::Cache,
+    last_overlay_key: Cell<Option<OverlayCacheKey>>,
     last_hover_time: Option<Instant>,
     last_left_click_time: Option<Instant>,
     last_left_click_rect: Option<usize>,
@@ -125,6 +169,8 @@ impl Default for CanvasState {
         Self {
             base_cache: canvas::Cache::new(),
             last_key: Cell::new(None),
+            overlay_cache: canvas::Cache::new(),
+            last_overlay_key: Cell::new(None),
             last_hover_time: None,
             last_left_click_time: None,
             last_left_click_rect: None,
@@ -227,50 +273,74 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
             // Obstacle overlay removed per UX request.
         });
 
-        let mut frame = Frame::new(renderer, bounds.size());
+        let overlay_key = OverlayCacheKey {
+            zoom: self.zoom,
+            pan_x: self.pan_x,
+            pan_y: self.pan_y,
+            bounds_x: bounds.x,
+            bounds_y: bounds.y,
+            bounds_w: bounds.width,
+            bounds_h: bounds.height,
+            output_revision: self.output_revision,
+            visible_count: count,
+            hovered_rect: self.hovered_rect,
+            dragged_rect: self.dragged_rect,
+            dragged_offset_x: self.dragged_rect_offset_x,
+            dragged_offset_y: self.dragged_rect_offset_y,
+            snap_preview: self.snap_preview,
+            is_area_selecting: self.is_area_selecting,
+            area_start: self.area_select_start,
+            area_current: self.area_select_current,
+            selected_hash: hash_selected(self.selected_rects),
+            regions_hash: hash_regions(self.selection_regions),
+        };
 
-        let stroke_selected = Stroke::default().with_color(Color::from_rgb(0.2, 0.9, 1.0)).with_width(2.5);
-        let stroke_hovered = Stroke::default().with_color(Color::from_rgb(1.0, 1.0, 1.0)).with_width(2.0);
+        if state.last_overlay_key.get() != Some(overlay_key) {
+            state.overlay_cache.clear();
+            state.last_overlay_key.set(Some(overlay_key));
+        }
 
-        if !self.selected_rects.is_empty() {
-            for idx in self.selected_rects.iter().copied() {
-                if idx >= count || self.dragged_rect == Some(idx) {
-                    continue;
+        let overlay_geometry = state.overlay_cache.draw(renderer, bounds.size(), |frame| {
+            let stroke_selected = Stroke::default().with_color(Color::from_rgb(0.2, 0.9, 1.0)).with_width(2.5);
+            let stroke_hovered = Stroke::default().with_color(Color::from_rgb(1.0, 1.0, 1.0)).with_width(2.0);
+
+            if !self.selected_rects.is_empty() {
+                for idx in self.selected_rects.iter().copied() {
+                    if idx >= count || self.dragged_rect == Some(idx) {
+                        continue;
+                    }
+                    let p = &self.output.placements[idx];
+                    let w = p.width as f32 * scale;
+                    let h = p.height as f32 * scale;
+                    let x_px = origin_x + p.x.into_inner() * scale;
+                    let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
+                    if x_px + w < 0.0 || x_px > bounds.width || y_px + h < 0.0 || y_px > bounds.height {
+                        continue;
+                    }
+                    let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
+                    frame.stroke(&rect_path, stroke_selected.clone());
                 }
-                let p = &self.output.placements[idx];
+            }
+
+            if let Some(hovered_idx) = self.hovered_rect && hovered_idx < count && self.dragged_rect != Some(hovered_idx) && !self.selected_rects.contains(&hovered_idx) {
+                let p = &self.output.placements[hovered_idx];
                 let w = p.width as f32 * scale;
                 let h = p.height as f32 * scale;
                 let x_px = origin_x + p.x.into_inner() * scale;
                 let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
-                if x_px + w < 0.0 || x_px > bounds.width || y_px + h < 0.0 || y_px > bounds.height {
-                    continue;
+                if x_px + w >= 0.0 && x_px <= bounds.width && y_px + h >= 0.0 && y_px <= bounds.height {
+                    let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
+                    frame.stroke(&rect_path, stroke_hovered.clone());
                 }
-                let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
-                frame.stroke(&rect_path, stroke_selected.clone());
             }
-        }
 
-        if let Some(hovered_idx) = self.hovered_rect && hovered_idx < count && self.dragged_rect != Some(hovered_idx) && !self.selected_rects.contains(&hovered_idx) {
-            let p = &self.output.placements[hovered_idx];
-            let w = p.width as f32 * scale;
-            let h = p.height as f32 * scale;
-            let x_px = origin_x + p.x.into_inner() * scale;
-            let y_px = origin_y + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale;
-            if x_px + w >= 0.0 && x_px <= bounds.width && y_px + h >= 0.0 && y_px <= bounds.height {
-                let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
-                frame.stroke(&rect_path, stroke_hovered.clone());
-            }
-        
-        }
-
-        if let Some(dragged_idx) = self.dragged_rect && dragged_idx < count {
+            if let Some(dragged_idx) = self.dragged_rect && dragged_idx < count {
                 let p = &self.output.placements[dragged_idx];
                 let w = p.width as f32 * scale;
                 let h = p.height as f32 * scale;
                 let x_px = origin_x + p.x.into_inner() * scale + self.dragged_rect_offset_x;
                 let y_px = origin_y
                     + (bin_h_units - (p.y.into_inner() + p.height as f32)) * scale + self.dragged_rect_offset_y;
-
 
                 if x_px + w >= 0.0 && x_px <= bounds.width && y_px + h >= 0.0 && y_px <= bounds.height {
                     let rect_path = Path::rectangle(Point::new(x_px, y_px), Size::new(w, h));
@@ -284,39 +354,39 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         height: bin_h_units * scale,
                     };
 
-                let is_inside = is_inside(&bin_rect, x_px, y_px, w, h);
-                let mut intersects = false;
+                    let is_inside = is_inside(&bin_rect, x_px, y_px, w, h);
+                    let mut intersects = false;
 
-                let dragged_bin_x = (x_px - origin_x) / scale;
-                let dragged_bin_y = bin_h_units - (y_px - origin_y) / scale - (p.height as f32);
-                let dragged_x1 = dragged_bin_x + p.width as f32;
-                let dragged_y1 = dragged_bin_y + p.height as f32;
+                    let dragged_bin_x = (x_px - origin_x) / scale;
+                    let dragged_bin_y = bin_h_units - (y_px - origin_y) / scale - (p.height as f32);
+                    let dragged_x1 = dragged_bin_x + p.width as f32;
+                    let dragged_y1 = dragged_bin_y + p.height as f32;
 
-                let candidates = if let Some(grid) = self.hit_grid {
-                    self.candidates_from_grid(grid, dragged_bin_x, dragged_bin_y, dragged_x1, dragged_y1, count)
-                } else {
-                    (0..count).collect()
-                };
+                    let candidates = if let Some(grid) = self.hit_grid {
+                        self.candidates_from_grid(grid, dragged_bin_x, dragged_bin_y, dragged_x1, dragged_y1, count)
+                    } else {
+                        (0..count).collect()
+                    };
 
-                for idx in candidates {
-                    if idx == dragged_idx {
-                        continue;
+                    for idx in candidates {
+                        if idx == dragged_idx {
+                            continue;
+                        }
+                        let other = &self.output.placements[idx];
+                        let other_width = other.width as f32 * scale;
+                        let other_height = other.height as f32 * scale;
+                        let other_x = origin_x + other.x.into_inner() * scale;
+                        let other_y = origin_y + (bin_h_units - (other.y.into_inner() + other.height as f32)) * scale;
+
+                        intersects = !(x_px + w <= other_x ||
+                                         x_px >= other_x + other_width ||
+                                         y_px + h <= other_y ||
+                                         y_px >= other_y + other_height);
+
+                        if intersects {
+                            break;
+                        }
                     }
-                    let other = &self.output.placements[idx];
-                    let other_width = other.width as f32 * scale;
-                    let other_height = other.height as f32 * scale;
-                    let other_x = origin_x + other.x.into_inner() * scale;
-                    let other_y = origin_y + (bin_h_units - (other.y.into_inner() + other.height as f32)) * scale;
-
-                    intersects = !(x_px + w <= other_x ||
-                                     x_px >= other_x + other_width ||
-                                     y_px + h <= other_y ||
-                                     y_px >= other_y + other_height);
-
-                    if intersects {
-                        break;
-                    }
-                }
 
                     let stroke_color = if is_inside && !intersects {
                         Color::from_rgb(0.3, 1.0, 0.4)
@@ -341,39 +411,39 @@ impl<'a> iced::widget::canvas::Program<Input> for BinCanvas<'a> {
                         );
                     }
                 }
-
             }
 
-        for region in self.selection_regions.iter() {
-            let sel_x = origin_x + region.bin_x * scale;
-            let sel_y = origin_y + (bin_h_units - region.bin_y - region.bin_h) * scale;
-            let sel_w = region.bin_w * scale;
-            let sel_h = region.bin_h * scale;
+            for region in self.selection_regions.iter() {
+                let sel_x = origin_x + region.bin_x * scale;
+                let sel_y = origin_y + (bin_h_units - region.bin_y - region.bin_h) * scale;
+                let sel_w = region.bin_w * scale;
+                let sel_h = region.bin_h * scale;
 
-            let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
+                let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
 
-            let (fill_color, stroke_color) = region_color(region.is_inherited);
-            frame.fill(&sel_path, Fill::from(fill_color));
-            frame.stroke(&sel_path, Stroke::default().with_color(stroke_color).with_width(1.5));
-        }
+                let (fill_color, stroke_color) = region_color(region.is_inherited);
+                frame.fill(&sel_path, Fill::from(fill_color));
+                frame.stroke(&sel_path, Stroke::default().with_color(stroke_color).with_width(1.5));
+            }
 
-        if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((current_x, current_y)) = self.area_select_current {
-            let local_start_x = start_x - bounds.x;
-            let local_start_y = start_y - bounds.y;
-            let local_current_x = current_x - bounds.x;
-            let local_current_y = current_y - bounds.y;
+            if self.is_area_selecting && let Some((start_x, start_y)) = self.area_select_start && let Some((current_x, current_y)) = self.area_select_current {
+                let local_start_x = start_x - bounds.x;
+                let local_start_y = start_y - bounds.y;
+                let local_current_x = current_x - bounds.x;
+                let local_current_y = current_y - bounds.y;
 
-            let sel_x = local_start_x.min(local_current_x);
-            let sel_y = local_start_y.min(local_current_y);
-            let sel_w = (local_current_x - local_start_x).abs();
-            let sel_h = (local_current_y - local_start_y).abs();
+                let sel_x = local_start_x.min(local_current_x);
+                let sel_y = local_start_y.min(local_current_y);
+                let sel_w = (local_current_x - local_start_x).abs();
+                let sel_h = (local_current_y - local_start_y).abs();
 
-            let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
-            frame.fill(&sel_path, Fill::from(Color::from_rgba(0.3, 0.5, 0.9, 0.15)));
-            frame.stroke(&sel_path, Stroke::default().with_color(Color::from_rgb(0.4, 0.65, 1.0)).with_width(1.5));
-        }
+                let sel_path = Path::rectangle(Point::new(sel_x, sel_y), Size::new(sel_w, sel_h));
+                frame.fill(&sel_path, Fill::from(Color::from_rgba(0.3, 0.5, 0.9, 0.15)));
+                frame.stroke(&sel_path, Stroke::default().with_color(Color::from_rgb(0.4, 0.65, 1.0)).with_width(1.5));
+            }
+        });
 
-        vec![base_geometry, frame.into_geometry()]
+        vec![base_geometry, overlay_geometry]
     }
 
     fn update(

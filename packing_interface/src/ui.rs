@@ -157,7 +157,55 @@ impl Default for PackingApp {
             context_menu_visible: false,
             context_menu_region: None,
             context_menu_position: (0.0, 0.0),
+            num_test_cases_input: String::new(),
+            display_visual: false,
+            multiple_test_cases: Vec::new(),
+            multiple_testcase_message: None,
         }
+    }
+}
+
+fn generate_random_test_case(rng: &mut impl rand::Rng) -> JsonInput {
+    const MIN_BIN_WIDTH: i32 = 5;
+    const MAX_BIN_WIDTH: i32 = 20;
+    const MIN_HEIGHT: i32 = 1;
+    const MAX_HEIGHT: i32 = 20;
+    const MIN_TYPES: usize = 3;
+    const MAX_TYPES: usize = 20;
+    const MIN_TOTAL_RECTS: i32 = 10;
+    const MAX_TOTAL_RECTS: i32 = 100;
+
+    let bin_width = rng.random_range(MIN_BIN_WIDTH..=MAX_BIN_WIDTH);
+    let num_types = rng.random_range(MIN_TYPES..=MAX_TYPES);
+
+    let mut rect_set: HashSet<(i32, i32)> = HashSet::new();
+    let mut rectangles: Vec<Rectangle> = Vec::new();
+
+    while rect_set.len() < num_types {
+        let width = rng.random_range(1..=bin_width);
+        let height = rng.random_range(MIN_HEIGHT..=MAX_HEIGHT);
+        if !rect_set.contains(&(width, height)) {
+            rect_set.insert((width, height));
+            rectangles.push(Rectangle { width, height, quantity: 1 });
+        }
+    }
+
+    let target_total = rng.random_range(MIN_TOTAL_RECTS..=MAX_TOTAL_RECTS);
+    let mut current_total: i32 = rectangles.len() as i32;
+    while current_total < target_total {
+        let idx = rng.random_range(0..rectangles.len());
+        let add = rng.random_range(1..=(target_total - current_total).min(5));
+        rectangles[idx].quantity += add;
+        current_total += add;
+    }
+
+    let total_rects: i32 = rectangles.iter().map(|r| r.quantity).sum();
+    JsonInput {
+        width_of_bin: bin_width,
+        number_of_rectangles: total_rects as usize,
+        number_of_types_of_rectangles: rectangles.len(),
+        autofill_option: false,
+        rectangle_list: rectangles,
     }
 }
 
@@ -173,6 +221,14 @@ impl PackingApp {
             Input::KChanged(k_input) => {
                 self.k_input = k_input;
             }
+            Input::NumTestCasesChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.num_test_cases_input = val;
+                }
+            }
+	    Input::DisplayVisual(val) => {
+		self.display_visual = val;
+	    }
             Input::AutofillChanged(autofile) => {
                 self.autofile = autofile;
             }
@@ -517,7 +573,6 @@ impl PackingApp {
                 let is_root = self.active_algo_tab_id == 0;
 
                 if is_root {
-                    // Root tab: use test case
                     if let Some(testcase) = &self.current_testcase {
                         let user_code = self.code_editor_content.text();
                         let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
@@ -781,66 +836,23 @@ impl PackingApp {
             }
             Input::GenerateTestCase => {
                 let mut rng = rand::rng();
-
-                const MIN_BIN_WIDTH: i32 = 5;
-                const MAX_BIN_WIDTH: i32 = 20;
-                const MIN_HEIGHT: i32 = 1;
-                const MAX_HEIGHT: i32 = 20;
-                const MIN_TYPES: usize = 3;
-                const MAX_TYPES: usize = 20;
-                const MIN_TOTAL_RECTS: i32 = 10;
-                const MAX_TOTAL_RECTS: i32 = 100;
-
-                let bin_width = rng.random_range(MIN_BIN_WIDTH..=MAX_BIN_WIDTH);
-
-                let num_types = rng.random_range(MIN_TYPES..=MAX_TYPES);
-
-                let mut rect_set: HashSet<(i32, i32)> = HashSet::new();
-                let mut rectangles: Vec<Rectangle> = Vec::new();
-
-                while rect_set.len() < num_types {
-                    let width = rng.random_range(1..=bin_width);
-                    let height = rng.random_range(MIN_HEIGHT..=MAX_HEIGHT);
-
-                    if !rect_set.contains(&(width, height)) {
-                        rect_set.insert((width, height));
-                        rectangles.push(Rectangle {
-                            width,
-                            height,
-                            quantity: 1,
-                        });
-                    }
-                }
-
-                let target_total = rng.random_range(MIN_TOTAL_RECTS..=MAX_TOTAL_RECTS);
-                let mut current_total: i32 = rectangles.len() as i32;
-
-                while current_total < target_total {
-                    let idx = rng.random_range(0..rectangles.len());
-                    let add = rng.random_range(1..=(target_total - current_total).min(5));
-                    rectangles[idx].quantity += add;
-                    current_total += add;
-                }
-
-                let total_rects: i32 = rectangles.iter().map(|r| r.quantity).sum();
-
-                let testcase = JsonInput {
-                    width_of_bin: bin_width,
-                    number_of_rectangles: total_rects as usize,
-                    number_of_types_of_rectangles: rectangles.len(),
-                    autofill_option: false,
-                    rectangle_list: rectangles,
-                };
-
+                let testcase = generate_random_test_case(&mut rng);
                 let msg = format!(
                     "Generated: {} rectangles, {} types, bin width {}",
                     testcase.number_of_rectangles,
                     testcase.number_of_types_of_rectangles,
                     testcase.width_of_bin
                 );
-
                 self.current_testcase = Some(testcase);
                 self.testcase_message = Some(msg);
+            }
+            Input::GenerateMultipleTestCases(n) => {
+                let mut rng = rand::rng();
+                self.multiple_test_cases = (0..n.max(0))
+                    .map(|_| generate_random_test_case(&mut rng))
+                    .collect();
+                let msg = format!("Generated: {} test cases", self.multiple_test_cases.len());
+                self.multiple_testcase_message = Some(msg);
             }
             Input::ToggleAreaSelectEnabled(enabled) => {
                 self.settings.area_select_enabled = enabled;
@@ -3026,6 +3038,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             testcase_message: self.testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
             is_root: self.active_algo_tab_id == 0,
+            num_test_cases_input: &self.num_test_cases_input,
+            display_visual: self.display_visual,
+            multiple_testcase_message: self.multiple_testcase_message.as_deref(),
         };
         let code_panel_content = build_code_panel(&editor_state);
 
