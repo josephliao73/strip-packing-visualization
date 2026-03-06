@@ -5,7 +5,7 @@ use iced::widget::{button, checkbox, column, container, row, text, text_input, t
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -161,6 +161,11 @@ impl Default for PackingApp {
             display_visual: false,
             multiple_test_cases: Vec::new(),
             multiple_testcase_message: None,
+            multiple_run_results: Vec::new(),
+            multiple_results_expanded: Vec::new(),
+            bottom_panel_height: 150.0,
+            is_resizing_panel: false,
+            panel_drag_last_y: 0.0,
         }
     }
 }
@@ -234,6 +239,58 @@ impl PackingApp {
 	    Input::DisplayVisual(val) => {
 		self.display_visual = val;
 	    }
+            Input::ToggleMultipleResultExpanded(idx) => {
+                if let Some(val) = self.multiple_results_expanded.get_mut(idx) {
+                    *val = !*val;
+                }
+            }
+            Input::PanelResizeStart => {
+                self.is_resizing_panel = true;
+                self.panel_drag_last_y = f32::NAN;
+            }
+            Input::PanelResizeMove(y) => {
+                if self.is_resizing_panel {
+                    if !self.panel_drag_last_y.is_nan() {
+                        let dy = y - self.panel_drag_last_y;
+                        self.bottom_panel_height = (self.bottom_panel_height - dy).clamp(50.0, 600.0);
+                    }
+                    self.panel_drag_last_y = y;
+                }
+            }
+            Input::PanelResizeEnd => {
+                self.is_resizing_panel = false;
+            }
+            Input::DisplayMultipleResult(idx) => {
+                if let Some(result) = self.multiple_run_results.get(idx) {
+                    if let Some(output) = result.output.clone() {
+                        let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Root")).count();
+                        let name = format!("Root {}", root_count + 1);
+                        let new_id = self.next_algo_tab_id;
+                        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+                        let placement_count = output.placements.len();
+                        self.algo_tabs.push(AlgoTab {
+                            id: new_id,
+                            name,
+                            selected_indices: Vec::new(),
+                            repacked_indices: Vec::new(),
+                            obstacle_spaces: Vec::new(),
+                            selection_regions: Vec::new(),
+                            code: self.code_editor_content.text(),
+                            last_right_panel_tab: RightPanelTab::Visualization,
+                            algorithm_output: Some(output),
+                            parent_output: None,
+                            repack_output: None,
+                            output_revision: 1,
+                            hit_grid: None,
+                            visible_rects: placement_count,
+                            animating: false,
+                        });
+                        self.set_active_algo_tab(new_id);
+                        self.active_tab = RightPanelTab::Visualization;
+                        self.rebuild_hit_grid();
+                    }
+                }
+            }
             Input::AutofillChanged(autofile) => {
                 self.autofile = autofile;
             }
@@ -747,9 +804,20 @@ impl PackingApp {
 		    }
                 } else {
                     let test_cases = self.multiple_test_cases.clone();
-                    for testcase in &test_cases {
-                        self.run_with_testcase(testcase);
-                    }
+                    let user_code = self.code_editor_content.text();
+                    let language = self.selected_language;
+                    let results: Vec<MultipleRunResult> = test_cases.iter().map(|testcase| {
+                        let run_result = run_code_with_testcase(language, &user_code, testcase);
+                        let (height, output) = match run_result {
+                            RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
+                            RunResult::Error { .. } => (None, None),
+                        };
+                        MultipleRunResult { testcase: testcase.clone(), height, output }
+                    }).collect();
+                    let n = results.len();
+                    self.multiple_results_expanded = vec![false; n];
+                    self.multiple_run_results = results;
+                    self.bottom_panel_tab = BottomPanelTab::Output;
                 }
             }
             Input::BottomPanelTabSelected(tab) => {
@@ -1083,6 +1151,20 @@ impl PackingApp {
                         Some(Input::InsertTab)
                     } else {
                         None
+                    }
+                })
+            );
+        }
+
+        if self.is_resizing_panel {
+            subscriptions.push(
+                iced::event::listen_with(|event, _status, _id| {
+                    match event {
+                        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_))
+                        | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => {
+                            Some(Input::PanelResizeEnd)
+                        }
+                        _ => None,
                     }
                 })
             );
@@ -3051,8 +3133,17 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             num_test_cases_input: &self.num_test_cases_input,
             display_visual: self.display_visual,
             multiple_testcase_message: self.multiple_testcase_message.as_deref(),
+            multiple_run_results: &self.multiple_run_results,
+            multiple_results_expanded: &self.multiple_results_expanded,
+            bottom_panel_height: self.bottom_panel_height,
         };
-        let code_panel_content = build_code_panel(&editor_state);
+        let code_panel_content = {
+            use iced::widget::mouse_area;
+            let inner = build_code_panel(&editor_state);
+            mouse_area(inner)
+                .on_move(|p| Input::PanelResizeMove(p.y))
+                .on_release(Input::PanelResizeEnd)
+        };
 
         let right_panel_content: Element<'_, Input> = match self.active_tab {
             RightPanelTab::Visualization => {

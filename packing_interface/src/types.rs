@@ -46,6 +46,13 @@ pub struct NonEmptySpace {
     pub y_2: f32,
 }
 
+#[derive(Debug, Clone)]
+pub struct MultipleRunResult {
+    pub testcase: JsonInput,
+    pub height: Option<f32>,
+    pub output: Option<AlgorithmOutput>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JsonInput {
     pub width_of_bin: i32,
@@ -97,6 +104,7 @@ pub enum Input {
     ToggleSettingsPanel,
     NumTestCasesChanged(String),
     DisplayVisual(bool),
+    ToggleMultipleResultExpanded(usize),
     AreaSelectStart(f32, f32),
     AreaSelectMove(f32, f32),
     AreaSelectEnd(Vec<usize>, f32, f32, f32, f32),
@@ -104,6 +112,10 @@ pub enum Input {
     HideContextMenu,
     RemoveSelectionRegion(usize),
     RepackSelectionRegion(usize),
+    PanelResizeStart,
+    PanelResizeMove(f32),
+    PanelResizeEnd,
+    DisplayMultipleResult(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]
@@ -210,6 +222,11 @@ pub struct PackingApp {
     pub display_visual: bool,
     pub multiple_test_cases: Vec<JsonInput>,
     pub multiple_testcase_message: Option<String>,
+    pub multiple_run_results: Vec<MultipleRunResult>,
+    pub multiple_results_expanded: Vec<bool>,
+    pub bottom_panel_height: f32,
+    pub is_resizing_panel: bool,
+    pub panel_drag_last_y: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
