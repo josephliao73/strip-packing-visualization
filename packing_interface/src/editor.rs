@@ -776,28 +776,23 @@ fn build_multi_run_results_content<'a>(
             display_btn
         };
 
-        rows.push(
-            row![
-                row_btn,
-                display_btn,
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center)
-            .width(Length::Fill)
-            .into()
-        );
+        rows.push(row_btn.into());
 
         if is_expanded {
             let json = serde_json::to_string_pretty(&result.testcase)
                 .unwrap_or_else(|_| "{}".to_string());
             rows.push(
                 container(
-                    text(json)
-                        .size(10)
-                        .font(Font::MONOSPACE)
-                        .style(|_theme: &Theme| text::Style {
-                            color: Some(Color::from_rgb(0.65, 0.75, 0.70)),
-                        })
+                    column![
+                        display_btn,
+                        text(json)
+                            .size(10)
+                            .font(Font::MONOSPACE)
+                            .style(|_theme: &Theme| text::Style {
+                                color: Some(Color::from_rgb(0.65, 0.75, 0.70)),
+                            }),
+                    ]
+                    .spacing(6)
                 )
                 .padding([4, 16])
                 .width(Length::Fill)
