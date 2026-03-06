@@ -569,216 +569,181 @@ impl PackingApp {
             Input::LanguageSelected(lang) => {
                 self.selected_language = lang;
             }
-            Input::RunCode => {
-                let is_root = self.active_algo_tab_id == 0;
-
-                if is_root {
-                    if let Some(testcase) = &self.current_testcase {
-                        let user_code = self.code_editor_content.text();
-                        let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
-                        println!("{:?}", result);
-
-                        match result {
-                            RunResult::Success { output, raw_json } => {
-                                if let Some(tab) = self.active_algo_tab_mut() {
-                                    tab.algorithm_output = Some(output);
-                                    tab.parent_output = None;
-                                    tab.repack_output = None;
-                                    tab.repacked_indices.clear();
-                                    tab.obstacle_spaces.clear();
-                                    tab.visible_rects = 0;
-                                    tab.animating = true;
-                                    tab.output_revision = tab.output_revision.wrapping_add(1);
-                                }
-                                if self.settings.auto_minimize_height {
-                                    self.apply_auto_minimize_height();
-                                }
-                                self.selected_rects.clear();
-                                self.rebuild_hit_grid();
-                                self.active_tab = RightPanelTab::Visualization;
-                                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
-                                    tab.last_right_panel_tab = self.active_tab;
-                                }
-                                self.error_message = Some("✓ Code executed successfully".to_string());
-                                self.code_output_json = Some(raw_json);
-                                self.code_errors.clear();
-                                self.bottom_panel_tab = BottomPanelTab::Output;
-                                // Reset drawing state and clear regions (new output = old regions invalid)
-                                self.new_area_select = true;
-                                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
-                                    tab.selection_regions.clear();
-                                }
-                            }
-                            RunResult::Error { errors } => {
-                                self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
-                                self.code_errors = errors;
-                                self.code_output_json = None;
-                                self.bottom_panel_tab = BottomPanelTab::Problems;
-                            }
+            Input::RunCode(which_tab) => {
+                if which_tab == 1 {
+                    let is_root = self.active_algo_tab_id == 0;
+                    if is_root {
+                        if let Some(testcase) = self.current_testcase.clone() {
+                            self.run_with_testcase(&testcase);
+                        } else {
+                            self.error_message = Some("No test case loaded. Import a test case first.".to_string());
+                            self.bottom_panel_tab = BottomPanelTab::TestCases;
                         }
                     } else {
-                        self.error_message = Some("No test case loaded. Import a test case first.".to_string());
-                        self.bottom_panel_tab = BottomPanelTab::TestCases;
-                    }
+			let tab_data = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id).cloned();
+			if let Some(tab) = tab_data {
+			    if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
+				if let Some(output) = tab.parent_output.as_ref().or(tab.algorithm_output.as_ref()) {
+				    let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
+				    eprintln!(
+					"Repack region: x={} y={} w={} h={} selected={} non_selected={}",
+					inherited_region.bin_x,
+					inherited_region.bin_y,
+					inherited_region.bin_w,
+					inherited_region.bin_h,
+					selected_indices.len(),
+					non_selected_indices.len()
+				    );
+				    eprintln!("Selected indices: {:?}", selected_indices);
+				    eprintln!("Non-selected indices: {:?}", non_selected_indices);
+
+				    let mut rectangles: Vec<Rectangle> = Vec::new();
+				    for &idx in &selected_indices {
+					let p = &output.placements[idx];
+					rectangles.push(Rectangle { width: p.width, height: p.height, quantity: 1 });
+					eprintln!(
+					    "Selected rect idx {} -> x={} y={} w={} h={}",
+					    idx,
+					    p.x.into_inner(),
+					    p.y.into_inner(),
+					    p.width,
+					    p.height
+					);
+				    }
+
+				    let mut non_empty_space: Vec<NonEmptySpace> = Vec::new();
+				    let mut obstacle_spaces: Vec<NonEmptySpace> = Vec::new();
+				    for &idx in &non_selected_indices {
+					let p = &output.placements[idx];
+					eprintln!(
+					    "Obstacle rect idx {} -> x={} y={} w={} h={}",
+					    idx,
+					    p.x.into_inner(),
+					    p.y.into_inner(),
+					    p.width,
+					    p.height
+					);
+					let rect_x1 = p.x.into_inner();
+					let rect_y1 = p.y.into_inner();
+					let rect_x2 = rect_x1 + p.width as f32;
+					let rect_y2 = rect_y1 + p.height as f32;
+
+					let region_x1 = inherited_region.bin_x;
+					let region_y1 = inherited_region.bin_y;
+					let region_x2 = inherited_region.bin_x + inherited_region.bin_w;
+					let region_y2 = inherited_region.bin_y + inherited_region.bin_h;
+
+					let inter_x1 = rect_x1.max(region_x1);
+					let inter_y1 = rect_y1.max(region_y1);
+					let inter_x2 = rect_x2.min(region_x2);
+					let inter_y2 = rect_y2.min(region_y2);
+
+					if inter_x2 > inter_x1 && inter_y2 > inter_y1 {
+					    let space = NonEmptySpace {
+						x_1: inter_x1 - region_x1,
+						y_1: inter_y1 - region_y1,
+						x_2: inter_x2 - region_x1,
+						y_2: inter_y2 - region_y1,
+					    };
+					    eprintln!("Obstacle region-local idx {} -> {:?}", idx, space);
+					    non_empty_space.push(space);
+					    obstacle_spaces.push(NonEmptySpace {
+						x_1: inter_x1,
+						y_1: inter_y1,
+						x_2: inter_x2,
+						y_2: inter_y2,
+					    });
+					}
+				    }
+
+				    if !rectangles.is_empty() {
+					let user_code = self.code_editor_content.text();
+					let temp_testcase = JsonInput {
+					    width_of_bin: inherited_region.bin_w.max(0.0) as i32,
+					    number_of_rectangles: rectangles.len(),
+					    number_of_types_of_rectangles: rectangles.len(),
+					    autofill_option: false,
+					    rectangle_list: rectangles,
+					};
+
+					let result = run_repack_code_with_testcase(
+					    self.selected_language,
+					    &user_code,
+					    &temp_testcase,
+					    inherited_region.bin_h.max(0.0),
+					    &non_empty_space,
+					);
+
+					match result {
+					    RunResult::Success { output: new_output, raw_json } => {
+						eprintln!(
+						    "Repack output: bin_width={} total_height={} placements={}",
+						    new_output.bin_width,
+						    new_output.total_height,
+						    new_output.placements.len()
+						);
+						for (i, p) in new_output.placements.iter().enumerate() {
+						    eprintln!(
+							"Repacked rect {} -> x={} y={} w={} h={}",
+							i,
+							p.x.into_inner(),
+							p.y.into_inner(),
+							p.width,
+							p.height
+						    );
+						}
+						let parent_snapshot = self
+						    .active_algo_tab()
+						    .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
+						let composed_output = parent_snapshot
+						    .as_ref()
+							.map(|parent| self.compose_repack_output(parent, &new_output, &selected_indices, inherited_region))
+							.unwrap_or_else(|| new_output.clone());
+
+						if let Some(tab) = self.active_algo_tab_mut() {
+						    tab.repack_output = Some(new_output);
+						    tab.algorithm_output = Some(composed_output);
+						    tab.repacked_indices = selected_indices.clone();
+						    tab.obstacle_spaces = obstacle_spaces.clone();
+						    tab.visible_rects = 0;
+						    tab.animating = true;
+						    tab.output_revision = tab.output_revision.wrapping_add(1);
+						}
+						if self.settings.auto_minimize_height {
+						    self.apply_auto_minimize_height();
+						}
+						self.selected_rects.clear();
+						self.rebuild_hit_grid();
+						self.active_tab = RightPanelTab::Visualization;
+						if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+						    tab.last_right_panel_tab = self.active_tab;
+						}
+						self.error_message = Some("✓ Code executed successfully".to_string());
+						self.code_output_json = Some(raw_json);
+						self.code_errors.clear();
+						self.bottom_panel_tab = BottomPanelTab::Output;
+						self.new_area_select = true;
+					    }
+					    RunResult::Error { errors } => {
+						self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
+						self.code_errors = errors;
+						self.code_output_json = None;
+						self.bottom_panel_tab = BottomPanelTab::Problems;
+					    }
+					}
+				    } else {
+					self.error_message = Some("Select at least one rectangle to repack.".to_string());
+				    }
+				}
+			    } else {
+				self.error_message = Some("No inherited region found.".to_string());
+			    }
+			}
+		    }
                 } else {
-                    let tab_data = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id).cloned();
-                    if let Some(tab) = tab_data {
-                        if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
-                            if let Some(output) = tab.parent_output.as_ref().or(tab.algorithm_output.as_ref()) {
-                                let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
-                                eprintln!(
-                                    "Repack region: x={} y={} w={} h={} selected={} non_selected={}",
-                                    inherited_region.bin_x,
-                                    inherited_region.bin_y,
-                                    inherited_region.bin_w,
-                                    inherited_region.bin_h,
-                                    selected_indices.len(),
-                                    non_selected_indices.len()
-                                );
-                                eprintln!("Selected indices: {:?}", selected_indices);
-                                eprintln!("Non-selected indices: {:?}", non_selected_indices);
-
-                                let mut rectangles: Vec<Rectangle> = Vec::new();
-                                for &idx in &selected_indices {
-                                    let p = &output.placements[idx];
-                                    rectangles.push(Rectangle { width: p.width, height: p.height, quantity: 1 });
-                                    eprintln!(
-                                        "Selected rect idx {} -> x={} y={} w={} h={}",
-                                        idx,
-                                        p.x.into_inner(),
-                                        p.y.into_inner(),
-                                        p.width,
-                                        p.height
-                                    );
-                                }
-
-                                let mut non_empty_space: Vec<NonEmptySpace> = Vec::new();
-                                let mut obstacle_spaces: Vec<NonEmptySpace> = Vec::new();
-                                for &idx in &non_selected_indices {
-                                    let p = &output.placements[idx];
-                                    eprintln!(
-                                        "Obstacle rect idx {} -> x={} y={} w={} h={}",
-                                        idx,
-                                        p.x.into_inner(),
-                                        p.y.into_inner(),
-                                        p.width,
-                                        p.height
-                                    );
-                                    let rect_x1 = p.x.into_inner();
-                                    let rect_y1 = p.y.into_inner();
-                                    let rect_x2 = rect_x1 + p.width as f32;
-                                    let rect_y2 = rect_y1 + p.height as f32;
-
-                                    let region_x1 = inherited_region.bin_x;
-                                    let region_y1 = inherited_region.bin_y;
-                                    let region_x2 = inherited_region.bin_x + inherited_region.bin_w;
-                                    let region_y2 = inherited_region.bin_y + inherited_region.bin_h;
-
-                                    let inter_x1 = rect_x1.max(region_x1);
-                                    let inter_y1 = rect_y1.max(region_y1);
-                                    let inter_x2 = rect_x2.min(region_x2);
-                                    let inter_y2 = rect_y2.min(region_y2);
-
-                                    if inter_x2 > inter_x1 && inter_y2 > inter_y1 {
-                                        let space = NonEmptySpace {
-                                            x_1: inter_x1 - region_x1,
-                                            y_1: inter_y1 - region_y1,
-                                            x_2: inter_x2 - region_x1,
-                                            y_2: inter_y2 - region_y1,
-                                        };
-                                        eprintln!("Obstacle region-local idx {} -> {:?}", idx, space);
-                                        non_empty_space.push(space);
-                                        obstacle_spaces.push(NonEmptySpace {
-                                            x_1: inter_x1,
-                                            y_1: inter_y1,
-                                            x_2: inter_x2,
-                                            y_2: inter_y2,
-                                        });
-                                    }
-                                }
-
-                                if !rectangles.is_empty() {
-                                    let user_code = self.code_editor_content.text();
-                                    let temp_testcase = JsonInput {
-                                        width_of_bin: inherited_region.bin_w.max(0.0) as i32,
-                                        number_of_rectangles: rectangles.len(),
-                                        number_of_types_of_rectangles: rectangles.len(),
-                                        autofill_option: false,
-                                        rectangle_list: rectangles,
-                                    };
-
-                                    let result = run_repack_code_with_testcase(
-                                        self.selected_language,
-                                        &user_code,
-                                        &temp_testcase,
-                                        inherited_region.bin_h.max(0.0),
-                                        &non_empty_space,
-                                    );
-
-                                    match result {
-                                        RunResult::Success { output: new_output, raw_json } => {
-                                            eprintln!(
-                                                "Repack output: bin_width={} total_height={} placements={}",
-                                                new_output.bin_width,
-                                                new_output.total_height,
-                                                new_output.placements.len()
-                                            );
-                                            for (i, p) in new_output.placements.iter().enumerate() {
-                                                eprintln!(
-                                                    "Repacked rect {} -> x={} y={} w={} h={}",
-                                                    i,
-                                                    p.x.into_inner(),
-                                                    p.y.into_inner(),
-                                                    p.width,
-                                                    p.height
-                                                );
-                                            }
-                                            let parent_snapshot = self
-                                                .active_algo_tab()
-                                                .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
-                                            let composed_output = parent_snapshot
-                                                .as_ref()
-                                                    .map(|parent| self.compose_repack_output(parent, &new_output, &selected_indices, inherited_region))
-                                                    .unwrap_or_else(|| new_output.clone());
-
-                                            if let Some(tab) = self.active_algo_tab_mut() {
-                                                tab.repack_output = Some(new_output);
-                                                tab.algorithm_output = Some(composed_output);
-                                                tab.repacked_indices = selected_indices.clone();
-                                                tab.obstacle_spaces = obstacle_spaces.clone();
-                                                tab.visible_rects = 0;
-                                                tab.animating = true;
-                                                tab.output_revision = tab.output_revision.wrapping_add(1);
-                                            }
-                                            if self.settings.auto_minimize_height {
-                                                self.apply_auto_minimize_height();
-                                            }
-                                            self.selected_rects.clear();
-                                            self.rebuild_hit_grid();
-                                            self.active_tab = RightPanelTab::Visualization;
-                                            if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
-                                                tab.last_right_panel_tab = self.active_tab;
-                                            }
-                                            self.error_message = Some("✓ Code executed successfully".to_string());
-                                            self.code_output_json = Some(raw_json);
-                                            self.code_errors.clear();
-                                            self.bottom_panel_tab = BottomPanelTab::Output;
-                                            self.new_area_select = true;
-                                        }
-                                        RunResult::Error { errors } => {
-                                            self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
-                                            self.code_errors = errors;
-                                            self.code_output_json = None;
-                                            self.bottom_panel_tab = BottomPanelTab::Problems;
-                                        }
-                                    }
-                                } else {
-                                    self.error_message = Some("Select at least one rectangle to repack.".to_string());
-                                }
-                            }
-                        } else {
-                            self.error_message = Some("No inherited region found.".to_string());
-                        }
+                    let test_cases = self.multiple_test_cases.clone();
+                    for testcase in &test_cases {
+                        self.run_with_testcase(testcase);
                     }
                 }
             }
@@ -1562,6 +1527,48 @@ fn snap_to_rectangles(
             rows,
             cells,
         });
+    }
+
+    fn run_with_testcase(&mut self, testcase: &JsonInput) {
+        let user_code = self.code_editor_content.text();
+        let result = run_code_with_testcase(self.selected_language, &user_code, testcase);
+        match result {
+            RunResult::Success { output, raw_json } => {
+                if let Some(tab) = self.active_algo_tab_mut() {
+                    tab.algorithm_output = Some(output);
+                    tab.parent_output = None;
+                    tab.repack_output = None;
+                    tab.repacked_indices.clear();
+                    tab.obstacle_spaces.clear();
+                    tab.visible_rects = 0;
+                    tab.animating = true;
+                    tab.output_revision = tab.output_revision.wrapping_add(1);
+                }
+                if self.settings.auto_minimize_height {
+                    self.apply_auto_minimize_height();
+                }
+                self.selected_rects.clear();
+                self.rebuild_hit_grid();
+                self.active_tab = RightPanelTab::Visualization;
+                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                    tab.last_right_panel_tab = self.active_tab;
+                }
+                self.error_message = Some("✓ Code executed successfully".to_string());
+                self.code_output_json = Some(raw_json);
+                self.code_errors.clear();
+                self.bottom_panel_tab = BottomPanelTab::Output;
+                self.new_area_select = true;
+                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                    tab.selection_regions.clear();
+                }
+            }
+            RunResult::Error { errors } => {
+                self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
+                self.code_errors = errors;
+                self.code_output_json = None;
+                self.bottom_panel_tab = BottomPanelTab::Problems;
+            }
+        }
     }
 
     fn active_algo_tab(&self) -> Option<&AlgoTab> {

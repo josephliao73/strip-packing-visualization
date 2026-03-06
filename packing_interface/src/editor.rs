@@ -157,7 +157,7 @@ fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
     );
 
     if has_testcase == 1 || has_testcase == 2 {
-        btn = btn.on_press(Input::RunCode);
+        btn = btn.on_press(Input::RunCode(has_testcase));
     }
 
     btn.padding([8, 24])
@@ -538,12 +538,6 @@ fn build_multiple_test_cases_content<'a>(message: Option<&'a str>, num_test_case
             ]
             .spacing(8)
             .align_y(Alignment::Center),
-            row![
-                text("Display visualization").size(11).font(ui_font),
-                checkbox("", display_visual).on_toggle(Input::DisplayVisual).size(11),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
             row![generate_button].align_y(Alignment::Center),
             text(message.unwrap_or("No test cases generated"))
                 .size(11)
@@ -726,10 +720,13 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
 
 pub fn build_code_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
     let language_selector = build_language_selector(state.selected_language);
-    let has_testcase: i32 = match state.bottom_panel_tab {
+    let has_testcase: i32 = if !state.is_root {
+	1
+    } else { match state.bottom_panel_tab {
         BottomPanelTab::TestCases => if state.testcase_message.is_some() {1} else {0},
         BottomPanelTab::MultipleTestCases => if state.multiple_testcase_message.is_some() {2} else {0},
         _ => 0,
+        }
     };
     let run_button = build_run_button(has_testcase);
     let code_editor = build_code_editor(state.code_editor_content, state.selected_language);

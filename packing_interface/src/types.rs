@@ -46,7 +46,7 @@ pub struct NonEmptySpace {
     pub y_2: f32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JsonInput {
     pub width_of_bin: i32,
     pub number_of_rectangles: usize,
@@ -83,7 +83,7 @@ pub enum Input {
     RemoveAlgoTab(u64),
     CodeEditorAction(text_editor::Action),
     LanguageSelected(CodeLanguage),
-    RunCode,
+    RunCode(i32),
     BottomPanelTabSelected(BottomPanelTab),
     ToggleBottomPanel,
     SaveOutputToFile,
