@@ -22,7 +22,8 @@ pub struct PythonRunner;
 
 impl PythonRunner {
     fn get_runner_path() -> PathBuf {
-        std::env::current_dir().unwrap().join("./runner_utils/python_runner.py")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/runner_utils/python_runner.py")
     }
 }
 

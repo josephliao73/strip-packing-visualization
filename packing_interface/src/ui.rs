@@ -157,6 +157,8 @@ impl Default for PackingApp {
             context_menu_region: None,
             context_menu_position: (0.0, 0.0),
             num_test_cases_input: String::new(),
+            input_size_input: String::new(),
+            unique_types_input: String::new(),
             display_visual: false,
             multiple_test_cases: Vec::new(),
             multiple_testcase_message: None,
@@ -169,21 +171,25 @@ impl Default for PackingApp {
     }
 }
 
-fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32) -> Vec<JsonInput> {
+fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32, input_size: Option<i32>, unique_types: Option<usize>) -> Vec<JsonInput> {
     let mut ret: Vec<JsonInput> = Vec::new();
-    const MIN_BIN_WIDTH: i32 = 5;
-    const MAX_BIN_WIDTH: i32 = 20;
     const MIN_HEIGHT: i32 = 1;
     const MAX_HEIGHT: i32 = 20;
     const MIN_TYPES: usize = 3;
     const MAX_TYPES: usize = 20;
     const MIN_TOTAL_RECTS: i32 = 10;
-    const MAX_TOTAL_RECTS: i32 = 100;
+    const DEFAULT_TOTAL_RECTS: i32 = 100;
 
     for _ in 0..n {
+	let target_total = input_size.unwrap_or(DEFAULT_TOTAL_RECTS).max(MIN_TOTAL_RECTS);
 
-	let bin_width = rng.random_range(MIN_BIN_WIDTH..=MAX_BIN_WIDTH);
-	let num_types = rng.random_range(MIN_TYPES..=MAX_TYPES);
+	// Scale bin width with sqrt(target_total) so larger inputs get wider bins
+	let base = ((target_total as f64).sqrt() * 2.0) as i32;
+	let min_bin = base.max(5);
+	let max_bin = (base * 3).max(min_bin + 5);
+	let bin_width = rng.random_range(min_bin..=max_bin);
+
+	let num_types = unique_types.unwrap_or_else(|| rng.random_range(MIN_TYPES..=MAX_TYPES));
 
 	let mut rect_set: HashSet<(i32, i32)> = HashSet::new();
 	let mut rectangles: Vec<Rectangle> = Vec::new();
@@ -197,7 +203,6 @@ fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32) -> Vec<JsonInput>
 	    }
 	}
 
-	let target_total = rng.random_range(MIN_TOTAL_RECTS..=MAX_TOTAL_RECTS);
 	let mut current_total: i32 = rectangles.len() as i32;
 	while current_total < target_total {
 	    let idx = rng.random_range(0..rectangles.len());
@@ -233,6 +238,16 @@ impl PackingApp {
             Input::NumTestCasesChanged(val) => {
                 if val.is_empty() || val.parse::<u32>().is_ok() {
                     self.num_test_cases_input = val;
+                }
+            }
+            Input::InputSizeChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.input_size_input = val;
+                }
+            }
+            Input::UniqueTypesChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.unique_types_input = val;
                 }
             }
 	    Input::DisplayVisual(val) => {
@@ -878,7 +893,9 @@ impl PackingApp {
             }
             Input::GenerateTestCase => {
                 let mut rng = rand::rng();
-                let testcase = generate_random_test_case(&mut rng, 1);
+                let input_size = self.input_size_input.parse::<i32>().ok();
+                let unique_types = self.unique_types_input.parse::<usize>().ok();
+                let testcase = generate_random_test_case(&mut rng, 1, input_size, unique_types);
                 let msg = format!(
                     "Generated: {} rectangles, {} types, bin width {}",
                     testcase[0].number_of_rectangles,
@@ -890,7 +907,9 @@ impl PackingApp {
             }
             Input::GenerateMultipleTestCases(n) => {
                 let mut rng = rand::rng();
-                self.multiple_test_cases = generate_random_test_case(&mut rng, n); 
+                let input_size = self.input_size_input.parse::<i32>().ok();
+                let unique_types = self.unique_types_input.parse::<usize>().ok();
+                self.multiple_test_cases = generate_random_test_case(&mut rng, n, input_size, unique_types);
                 let msg = format!("Generated: {} test cases", self.multiple_test_cases.len());
                 self.multiple_testcase_message = Some(msg);
             }
@@ -3180,6 +3199,8 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                 .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
                 .unwrap_or(true),
             num_test_cases_input: &self.num_test_cases_input,
+            input_size_input: &self.input_size_input,
+            unique_types_input: &self.unique_types_input,
             display_visual: self.display_visual,
             multiple_testcase_message: self.multiple_testcase_message.as_deref(),
             multiple_run_results: &self.multiple_run_results,

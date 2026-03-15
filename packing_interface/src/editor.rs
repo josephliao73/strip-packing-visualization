@@ -17,6 +17,8 @@ pub struct EditorState<'a> {
     pub testcase: Option<&'a JsonInput>,
     pub is_root: bool,  // True for root tab, false for nodes (nodes don't have test cases)
     pub num_test_cases_input: &'a str,
+    pub input_size_input: &'a str,
+    pub unique_types_input: &'a str,
     pub display_visual: bool,
     pub multiple_run_results: &'a [MultipleRunResult],
     pub multiple_results_expanded: &'a [bool],
@@ -495,7 +497,13 @@ fn build_output_content<'a>(json: Option<&'a str>) -> Element<'a, Input> {
     }
 }
 
-fn build_multiple_test_cases_content<'a>(message: Option<&'a str>, num_test_cases: &'a str, display_visual: bool) -> Element<'a, Input> {
+fn build_multiple_test_cases_content<'a>(
+    message: Option<&'a str>,
+    num_test_cases: &'a str,
+    input_size: &'a str,
+    unique_types: &'a str,
+    display_visual: bool,
+) -> Element<'a, Input> {
     let ui_font = Font::default();
 
     let n_input = text_input("Number of test cases", num_test_cases)
@@ -503,6 +511,38 @@ fn build_multiple_test_cases_content<'a>(message: Option<&'a str>, num_test_case
         .size(11)
         .padding(8)
         .width(Length::Fixed(120.0));
+
+    let input_size_placeholder = if input_size.is_empty() { "100" } else { "" };
+    let input_size_field = text_input(input_size_placeholder, input_size)
+        .on_input(Input::InputSizeChanged)
+        .size(11)
+        .padding(8)
+        .width(Length::Fixed(90.0))
+        .style(move |theme: &Theme, status| {
+            let mut style = text_input::default(theme, status);
+            if input_size.is_empty() {
+                style.value = Color::from_rgb(0.38, 0.38, 0.44);
+            }
+            style
+        });
+
+    let input_size_default_label: Element<'a, Input> = if input_size.is_empty() {
+        text("(default)")
+            .size(10)
+            .font(ui_font)
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.35, 0.35, 0.42)),
+            })
+            .into()
+    } else {
+        column![].into()
+    };
+
+    let unique_types_field = text_input("Any", unique_types)
+        .on_input(Input::UniqueTypesChanged)
+        .size(11)
+        .padding(8)
+        .width(Length::Fixed(90.0));
 
     let count = num_test_cases.parse::<i32>().unwrap_or(0);
     let enabled = count > 0;
@@ -534,13 +574,29 @@ fn build_multiple_test_cases_content<'a>(message: Option<&'a str>, num_test_case
         generate_button = generate_button.on_press(Input::GenerateMultipleTestCases(count));
     }
 
+    let dim_label = |label: &'static str| {
+        text(label)
+            .size(11)
+            .font(Font::default())
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.5, 0.5, 0.55)),
+            })
+    };
+
     container(
         column![
             row![
-                text("Count:").size(11).font(ui_font),
+                dim_label("Count:"),
                 n_input,
+                column![].width(16),
+                dim_label("Input size:"),
+                input_size_field,
+                input_size_default_label,
+                column![].width(16),
+                dim_label("Unique types:"),
+                unique_types_field,
             ]
-            .spacing(8)
+            .spacing(6)
             .align_y(Alignment::Center),
             row![generate_button].align_y(Alignment::Center),
             text(message.unwrap_or("No test cases generated"))
@@ -557,7 +613,7 @@ fn build_multiple_test_cases_content<'a>(message: Option<&'a str>, num_test_case
     .into()
 }
 
-fn build_test_cases_content<'a>(message: Option<&'a str>, testcase: Option<&'a JsonInput>) -> Element<'a, Input> {
+fn build_test_cases_content<'a>(message: Option<&'a str>, testcase: Option<&'a JsonInput>, input_size: &'a str, unique_types: &'a str) -> Element<'a, Input> {
     let ui_font = Font::default();
 
     let import_button = button(
@@ -650,6 +706,47 @@ fn build_test_cases_content<'a>(message: Option<&'a str>, testcase: Option<&'a J
         column![].into()
     };
 
+    let input_size_placeholder = if input_size.is_empty() { "100" } else { "" };
+    let input_size_field = text_input(input_size_placeholder, input_size)
+        .on_input(Input::InputSizeChanged)
+        .size(11)
+        .padding(8)
+        .width(Length::Fixed(90.0))
+        .style(move |theme: &Theme, status| {
+            let mut style = text_input::default(theme, status);
+            if input_size.is_empty() {
+                style.value = Color::from_rgb(0.38, 0.38, 0.44);
+            }
+            style
+        });
+
+    let input_size_default_label: Element<'a, Input> = if input_size.is_empty() {
+        text("(default)")
+            .size(10)
+            .font(ui_font)
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.35, 0.35, 0.42)),
+            })
+            .into()
+    } else {
+        column![].into()
+    };
+
+    let unique_types_field = text_input("Any", unique_types)
+        .on_input(Input::UniqueTypesChanged)
+        .size(11)
+        .padding(8)
+        .width(Length::Fixed(90.0));
+
+    let dim_label = |label: &'static str| {
+        text(label)
+            .size(11)
+            .font(Font::default())
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.5, 0.5, 0.55)),
+            })
+    };
+
     container(
         column![
             row![
@@ -660,10 +757,20 @@ fn build_test_cases_content<'a>(message: Option<&'a str>, testcase: Option<&'a J
             ]
             .spacing(12)
             .align_y(Alignment::Center),
-            column![].height(8),
+            row![
+                dim_label("Input size:"),
+                input_size_field,
+                input_size_default_label,
+                column![].width(16),
+                dim_label("Unique types:"),
+                unique_types_field,
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+            column![].height(4),
             testcase_display,
         ]
-        .spacing(0)
+        .spacing(6)
         .height(Length::Fill)
     )
     .padding(12)
@@ -836,10 +943,10 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
                 }
             }
             BottomPanelTab::TestCases => {
-                build_test_cases_content(state.testcase_message, state.testcase)
+                build_test_cases_content(state.testcase_message, state.testcase, state.input_size_input, state.unique_types_input)
             }
             BottomPanelTab::MultipleTestCases => {
-                build_multiple_test_cases_content(state.multiple_testcase_message, state.num_test_cases_input, state.display_visual)
+                build_multiple_test_cases_content(state.multiple_testcase_message, state.num_test_cases_input, state.input_size_input, state.unique_types_input, state.display_visual)
             }
         };
 
