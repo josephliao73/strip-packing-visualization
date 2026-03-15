@@ -21,7 +21,6 @@ class Packing:
 
         placements = []
         total_height = 0
-
         for rect in items:
             w = rect["width"]
             h = rect["height"]
@@ -260,32 +259,37 @@ impl PackingApp {
             Input::PanelResizeEnd => {
                 self.is_resizing_panel = false;
             }
+            Input::CreateNewTab => {
+                self.create_new_tab(None);
+            }
             Input::DisplayMultipleResult(idx) => {
                 if let Some(result) = self.multiple_run_results.get(idx) {
+                    // If already displayed and tab still exists, just switch to it
+                    if let Some(existing_tab_id) = result.tab_id {
+                        if self.algo_tabs.iter().any(|t| t.id == existing_tab_id) {
+                            self.set_active_algo_tab(existing_tab_id);
+                            self.active_tab = RightPanelTab::Visualization;
+                            return ();
+                        }
+                    }
                     if let Some(output) = result.output.clone() {
-                        let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Root")).count();
-                        let name = format!("Root {}", root_count + 1);
-                        let new_id = self.next_algo_tab_id;
-                        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
                         let placement_count = output.placements.len();
-                        self.algo_tabs.push(AlgoTab {
-                            id: new_id,
-                            name,
-                            selected_indices: Vec::new(),
-                            repacked_indices: Vec::new(),
-                            obstacle_spaces: Vec::new(),
-                            selection_regions: Vec::new(),
-                            code: self.code_editor_content.text(),
-                            last_right_panel_tab: RightPanelTab::Visualization,
-                            algorithm_output: Some(output),
-                            parent_output: None,
-                            repack_output: None,
-                            output_revision: 1,
-                            hit_grid: None,
-                            visible_rects: placement_count,
-                            animating: false,
-                        });
-                        self.set_active_algo_tab(new_id);
+                        let current_tab_has_output = self.active_algo_tab()
+                            .map(|t| t.algorithm_output.is_some())
+                            .unwrap_or(false);
+                        let assigned_tab_id = if current_tab_has_output {
+                            self.create_new_tab(Some(&output))
+                        } else {
+                            let current_id = self.active_algo_tab_id;
+                            if let Some(tab) = self.active_algo_tab_mut() {
+                                tab.algorithm_output = Some(output);
+                                tab.output_revision = tab.output_revision.wrapping_add(1);
+                                tab.visible_rects = placement_count;
+                                tab.animating = false;
+                            }
+                            current_id
+                        };
+                        self.multiple_run_results[idx].tab_id = Some(assigned_tab_id);
                         self.active_tab = RightPanelTab::Visualization;
                         self.rebuild_hit_grid();
                     }
@@ -812,7 +816,7 @@ impl PackingApp {
                             RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
                             RunResult::Error { .. } => (None, None),
                         };
-                        MultipleRunResult { testcase: testcase.clone(), height, output }
+                        MultipleRunResult { testcase: testcase.clone(), height, output, tab_id: None }
                     }).collect();
                     let n = results.len();
                     self.multiple_results_expanded = vec![false; n];
@@ -1173,6 +1177,7 @@ impl PackingApp {
         Subscription::batch(subscriptions)
     }
 
+
 fn try_snap_rectangle(
     &self,
     rect_idx: usize,
@@ -1257,6 +1262,8 @@ if !self.settings.snap_to_rectangles_enabled {
 
     Some((sx, sy))
 }
+
+
 
 fn snap_to_rectangles(
     &self,
@@ -1772,6 +1779,32 @@ fn snap_to_rectangles(
             tab.output_revision = tab.output_revision.wrapping_add(1);
             self.rebuild_hit_grid();
         }
+    }
+
+    fn create_new_tab(&mut self, output: Option<&AlgorithmOutput>) -> u64 {
+	let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Root")).count();
+	let name = format!("Root {}", root_count + 1);
+	let new_id = self.next_algo_tab_id;
+	self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+	self.algo_tabs.push(AlgoTab {
+	    id: new_id,
+	    name,
+	    selected_indices: Vec::new(),
+	    repacked_indices: Vec::new(),
+	    obstacle_spaces: Vec::new(),
+	    selection_regions: Vec::new(),
+	    code: self.code_editor_content.text(),
+	    last_right_panel_tab: RightPanelTab::Visualization,
+	    algorithm_output: output.cloned(),
+	    parent_output: None,
+	    repack_output: None,
+	    output_revision: if output.is_some() { 1 } else { 0 },
+	    hit_grid: None,
+	    visible_rects: output.map(|o| o.placements.len()).unwrap_or(0),
+	    animating: false,
+	});
+	self.set_active_algo_tab(new_id);
+	new_id
     }
 
     fn set_active_algo_tab(&mut self, tab_id: u64) {
@@ -3094,6 +3127,20 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
 
                 tab_btn
             }))
+            .push(
+                button(text("+").size(14).font(ui_font))
+                    .on_press(Input::CreateNewTab)
+                    .padding([6, 10])
+                    .style(|_theme: &Theme, status| button::Style {
+                        background: Some(match status {
+                            button::Status::Hovered => Color::from_rgb(0.10, 0.10, 0.13).into(),
+                            _ => Color::TRANSPARENT.into(),
+                        }),
+                        border: iced::Border { radius: 4.0.into(), ..Default::default() },
+                        text_color: Color::from_rgb(0.5, 0.5, 0.55),
+                        ..Default::default()
+                    })
+            )
             .spacing(1)
             .align_y(Alignment::End)
         };
@@ -3129,7 +3176,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             show_visualization_button: false,
             testcase_message: self.testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
-            is_root: self.active_algo_tab_id == 0,
+            is_root: self.active_algo_tab()
+                .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
+                .unwrap_or(true),
             num_test_cases_input: &self.num_test_cases_input,
             display_visual: self.display_visual,
             multiple_testcase_message: self.multiple_testcase_message.as_deref(),

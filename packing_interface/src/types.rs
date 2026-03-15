@@ -51,6 +51,7 @@ pub struct MultipleRunResult {
     pub testcase: JsonInput,
     pub height: Option<f32>,
     pub output: Option<AlgorithmOutput>,
+    pub tab_id: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -116,6 +117,7 @@ pub enum Input {
     PanelResizeMove(f32),
     PanelResizeEnd,
     DisplayMultipleResult(usize),
+    CreateNewTab,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]

@@ -720,7 +720,7 @@ fn build_multi_run_results_content<'a>(
             .map(|h| format!("{:.2}", h))
             .unwrap_or_else(|| "Error".to_string());
         let arrow = if is_expanded { "▼" } else { "▶" };
-        let label = format!("{}  Test Case {} — Height: {}", arrow, i + 1, height_str);
+        let label = format!("{}  Test Case {} - Height: {}", arrow, i + 1, height_str);
 
         let row_btn = button(
             text(label).size(11).font(ui_font)
