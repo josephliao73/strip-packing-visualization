@@ -68,7 +68,7 @@ output = {
     "placements": placements
 }
 
-with open("output.json", "w") as out:
+with open("bad.json", "w") as out:
     json.dump(output, out, indent=2)
 
 print("Saved to output.json")

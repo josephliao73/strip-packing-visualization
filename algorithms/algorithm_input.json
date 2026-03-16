@@ -1,43 +1,23 @@
 {
-  "width_of_bin": 233,
-  "number_of_rectangles": 8315,
-  "number_of_types_of_rectangles": 7,
+  "width_of_bin": 500,
+  "number_of_rectangles": 795275,
+  "number_of_types_of_rectangles": 3,
   "autofill_option": false,
   "rectangle_list": [
     {
-      "width": 3,
-      "height": 3,
-      "quantity": 2123
-    },
-    {
-      "width": 4,
-      "height": 4,
-      "quantity": 2933
+      "width": 5,
+      "height": 5,
+      "quantity": 234512
     },
     {
       "width": 7,
       "height": 7,
-      "quantity": 2013
+      "quantity": 345521
     },
     {
-      "width": 11,
-      "height": 11,
-      "quantity": 352
-    },
-    {
-      "width": 13,
-      "height": 13,
-      "quantity": 345
-    },
-    {
-      "width": 17,
-      "height": 29,
-      "quantity": 345
-    },
-    {
-      "width": 14,
-      "height": 19,
-      "quantity": 204
+      "width": 9,
+      "height": 9,
+      "quantity": 215242
     }
   ]
 }

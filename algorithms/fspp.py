@@ -23,15 +23,24 @@ configurations = []
 
 def get_config(type_idx, counts, remaining_width):
     if type_idx == num_types:
-        if any(c > 0 for c in counts):
-            configurations.append(counts.copy())
+        if not any(c > 0 for c in counts):
+            return
+
+        for i in range(num_types):
+            w_i = type_keys[i][0]
+            if w_i <= remaining_width + 1e-9:
+                return
+
+        configurations.append(counts.copy())
         return
 
     w_i = type_keys[type_idx][0]
-    max_count = remaining_width // w_i
-    for c in range(int(max_count) + 1):
+    max_count = int((remaining_width + 1e-9) // w_i)
+
+    for c in range(max_count, -1, -1):
         counts[type_idx] = c
         get_config(type_idx + 1, counts, remaining_width - c * w_i)
+
     counts[type_idx] = 0
 
 get_config(0, [0] * num_types, bin_width)
@@ -105,6 +114,8 @@ for j, xj in enumerate(x_values):
 
     current_y += xj
 
+print(fractional_bands)
+print(len(fractional_bands))
 fractional_total_height = current_y
 
 placements = []
@@ -153,8 +164,6 @@ output = {
     "placements": placements
 }
 
-with open("output.json", "w") as out:
+print("DONE")
+with open("bad.json", "w") as out:
     json.dump(output, out, indent=2)
-
-print("Saved to output.json")
-
