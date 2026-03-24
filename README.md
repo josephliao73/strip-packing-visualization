@@ -8,14 +8,14 @@ Desktop application for creating 2D bin-packing inputs, running custom packing c
 - `packing_lib/`: small Python helper package metadata
 - `algorithms/`: sample inputs, outputs, and example scripts
 
-## What the App Does
+## What it does
 
-The interface supports four main workflows:
+The interface supports these main workflows:
 
-1. Create a bin-packing instance manually and export it as normalized JSON.
-2. Import an existing input file and edit it in the UI.
-3. Run custom algorithm code from the built-in editor and visualize the result.
-4. Import an algorithm output JSON directly and inspect or adjust the layout.
+- create a bin-packing instance manually and export it as normalized JSON
+- import an existing input file and edit it in the UI
+- run custom algorithm code from the built-in editor and visualize the result
+- import an algorithm output JSON directly and inspect or adjust the layout
 
 It also supports:
 
@@ -62,7 +62,9 @@ cargo build
 
 ## How to Use the Interface
 
-### 1. Create a packing input manually
+### 1. Generate input
+
+#### 1.1. Create input manually
 
 Use the left-side input form:
 
@@ -91,9 +93,7 @@ Each line means:
 - `height`: rectangle height
 - `quantity`: number of copies of that rectangle type
 
-Then click `Export Algorithm Input` to save a normalized JSON file.
-
-### 2. Import an existing configuration
+#### 1.2. Import an existing configuration
 
 Click `Import Configuration`.
 
@@ -109,7 +109,7 @@ Behavior:
 - text-based files are loaded directly into the rectangle editor
 - JSON files are parsed as the app's input format and populate the form fields automatically
 
-### 3. Use autofill
+#### 1.3. Use autofill
 
 If `Autofill remaining values` is enabled, the app attempts to complete missing values based on the rectangles already entered.
 
@@ -121,20 +121,71 @@ Autofill behavior:
 
 Autofill can fail if the requested `N` and `K` constraints are impossible given the current input.
 
-### 4. Run a custom algorithm from the built-in editor
+#### 1.4. Export normalized input JSON
+
+After entering or importing data, click `Export Algorithm Input`.
+
+This saves a normalized JSON file that can be used:
+
+- by external algorithms
+- as a reusable test case
+- as a standard input format for later runs
+
+### 2. Generate test cases
+
+The editor bottom panel provides test-case workflows for running algorithms.
+
+#### 2.1. Single test case
+
+Use `Single Test Case` when you want one input instance.
+
+Available actions:
+
+- `Import Test Case`: load one existing JSON test case
+- `Generate Random`: create one random test case
+
+Controls:
+
+- `Input size`: approximate total number of rectangles
+- `Unique types`: number of distinct rectangle dimensions
+
+#### 2.2. Multiple test cases
+
+Use `Multiple Test Cases` when you want to benchmark one algorithm across many random instances.
+
+Workflow:
+
+1. Enter the number of cases.
+2. Optionally set `Input size`.
+3. Optionally set `Unique types`.
+4. Click `Generate Test Cases`.
+5. Click `Run`.
+
+After execution you can:
+
+- inspect the average output height
+- expand individual cases
+- click `Display` to open a result in a visualization tab
+
+### 3. Run algorithms
 
 Open the code/editor panel and load or write your algorithm.
+
+#### 3.1. Language support
 
 Current practical constraint:
 
 - the app UI shows `Python`, `C++`, and `Java`
-- execution is currently routed through the Python runner, so Python is the working path to rely on
+- execution is currently routed through the Python runner
+- Python is the reliable path to use
 
-Before you can run code in the root tab, load a test case:
+#### 3.2. Root-tab execution
 
-- use `Single Test Case` -> `Import Test Case`, or
-- use `Single Test Case` -> `Generate Random`, or
-- use `Multiple Test Cases` -> generate a batch
+Before `Run` is enabled in the root tab, load a test case using one of these:
+
+- `Single Test Case` -> `Import Test Case`
+- `Single Test Case` -> `Generate Random`
+- `Multiple Test Cases` -> generate a batch
 
 Then click `Run`.
 
@@ -144,51 +195,9 @@ Successful runs:
 - enable `Show Visualization`
 - let you save the produced JSON to disk
 
-### 5. Visualize an output JSON directly
+#### 3.3. Region repacking
 
-Click `Import Output JSON` and choose a file with the expected output schema.
-
-This is useful if:
-
-- you ran your algorithm outside the app
-- you want to inspect a previously saved solution
-- you want to manually adjust placements in the canvas
-
-### 6. Work with test cases
-
-The editor's bottom panel has these modes:
-
-- `Single Test Case`: import one test case JSON or generate one random case
-- `Multiple Test Cases`: generate many random cases and run the same algorithm on all of them
-- `Output`: inspect result JSON and summary output
-
-For random test-case generation:
-
-- `Input size` controls the approximate total number of rectangles
-- `Unique types` constrains the number of distinct rectangle dimensions
-
-For multiple test cases:
-
-- enter the number of cases
-- click `Generate Test Cases`
-- click `Run`
-- inspect average height and per-case results
-- use `Display` on a result to open that output in a visualization tab
-
-### 7. Use the visualization canvas
-
-Once an output is loaded or produced, the visualization panel lets you:
-
-- zoom in and out
-- pan around the layout
-- animate rectangle appearance
-- drag rectangles
-- snap rectangles to nearby edges
-- save the current output JSON
-
-### 8. Repack a selected region
-
-The app supports a sub-problem workflow:
+The app supports a sub-problem workflow for local improvements:
 
 1. Run or import a packing result.
 2. Select a region in the visualization.
@@ -202,7 +211,51 @@ The child tab passes:
 - overlapping non-selected rectangles as obstacles (`non_empty_space`)
 - the selected region dimensions as the local bin
 
-This is intended for experimenting with local improvement heuristics.
+### 4. Show visualization
+
+#### 4.1. Visualize imported output
+
+Click `Import Output JSON` and choose a file with the expected output schema.
+
+This is useful if:
+
+- you ran your algorithm outside the app
+- you want to inspect a previously saved solution
+- you want to manually adjust placements in the canvas
+
+#### 4.2. Use the visualization canvas
+
+Once an output is loaded or produced, the visualization panel lets you:
+
+- zoom in and out
+- pan around the layout
+- animate rectangle appearance
+- drag rectangles
+- snap rectangles to nearby edges
+- inspect repacked regions
+
+### 5. Output handling
+
+#### 5.1. Review output JSON
+
+After a successful run, the bottom panel shows:
+
+- the generated JSON output
+- execution results for single or multiple test cases
+- average height across batch runs when applicable
+
+#### 5.2. Save output JSON
+
+You can save the current result by using:
+
+- `Save Output Json`
+- `Save to File`
+
+This is useful for:
+
+- storing a solution produced by the embedded runner
+- reloading it later through `Import Output JSON`
+- comparing outputs across different algorithms
 
 ## Algorithm Interfaces
 
