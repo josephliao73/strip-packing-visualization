@@ -1906,7 +1906,7 @@ fn snap_to_rectangles(
 
     fn parse_rectangles(&self) -> Result<ParseOutput, Vec<String>> {
         let text = self.rectangle_data.text();
-        let mut rectangles = Vec::new();
+        let mut rectangles: Vec<Rectangle> = Vec::new();
         let mut errors = Vec::new();
         let mut w_val: i32 = -1;
         let mut total: i32 = 0;
@@ -1992,11 +1992,14 @@ fn snap_to_rectangles(
                     total += q;
                     if x > w_val {
                         errors.push(format!("Line {}: '{}' is greater than the width {}", line_num+1, parts[0], w_val));
+                    } else if let Some(existing) = rectangles.iter_mut().find(|r| r.width == x && r.height == y) {
+                        existing.quantity += q;
+                        set.insert((x, y));
                     } else {
-                        rectangles.push(Rectangle { 
-                            width: x, 
-                            height: y, 
-                            quantity: q 
+                        rectangles.push(Rectangle {
+                            width: x,
+                            height: y,
+                            quantity: q
                         });
                         set.insert((x, y));
                     }

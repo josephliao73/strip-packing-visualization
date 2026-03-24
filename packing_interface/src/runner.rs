@@ -25,6 +25,16 @@ impl PythonRunner {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src/runner_utils/python_runner.py")
     }
+
+    fn get_python_bin() -> std::ffi::OsString {
+        let venv_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".venv/bin/python3");
+        if venv_python.exists() {
+            venv_python.into_os_string()
+        } else {
+            std::ffi::OsString::from("python3")
+        }
+    }
 }
 
 impl LanguageRunner for PythonRunner {
@@ -59,7 +69,7 @@ impl LanguageRunner for PythonRunner {
         dbg!(rectangles);
         let runner_path = Self::get_runner_path();
 
-        let output = std::process::Command::new("python3")
+        let output = std::process::Command::new(Self::get_python_bin())
             .arg(&runner_path)
             .arg(&solution_path)
             .arg(bin_width.to_string())
@@ -129,7 +139,7 @@ impl LanguageRunner for PythonRunner {
         dbg!(rectangles);
         let runner_path = Self::get_runner_path();
 
-        let output = std::process::Command::new("python3")
+        let output = std::process::Command::new(Self::get_python_bin())
             .arg(&runner_path)
             .arg(&solution_path)
             .arg((bin_height.max(0.0).round() as i32).to_string())
