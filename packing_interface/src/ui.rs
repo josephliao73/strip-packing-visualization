@@ -10,6 +10,57 @@ use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
 
+const CPP_ROOT_CODE: &str = r#"#include "packing_lib.h"
+using namespace packing;
+
+class Packing {
+public:
+    // rectangles: each element is (width, height, quantity)
+    // returns:    placements as (x, y, width, height)
+    std::vector<std::tuple<double, double, int, int>> solve(
+        int binWidth,
+        const std::vector<std::tuple<int, int, int>>& rectangles
+    ) {
+        auto items = expand_items(rectangles);
+
+        std::vector<std::tuple<double, double, int, int>> placements;
+        double y = 0.0;
+        for (const auto& item : items) {
+            placements.push_back({0.0, y, item.width, item.height});
+            y += item.height;
+        }
+        return placements;
+    }
+};
+"#;
+
+const CPP_NODE_CODE: &str = r#"#include "packing_lib.h"
+using namespace packing;
+
+class Repacking {
+public:
+    // rectangles: each element is (width, height, quantity)
+    // obstacles:  Obstacle { x1, x2, y1, y2 } — regions already occupied
+    // returns:    placements as (x, y, width, height)
+    std::vector<std::tuple<double, double, int, int>> solve(
+        int binHeight,
+        int binWidth,
+        const std::vector<std::tuple<int, int, int>>& rectangles,
+        const std::vector<Obstacle>& obstacles
+    ) {
+        auto items = expand_items(rectangles);
+
+        std::vector<std::tuple<double, double, int, int>> placements;
+        double y = 0.0;
+        for (const auto& item : items) {
+            placements.push_back({0.0, y, item.width, item.height});
+            y += item.height;
+        }
+        return placements;
+    }
+};
+"#;
+
 const ROOT_CODE: &str = r#"
 import packing_lib
 import json
@@ -665,6 +716,19 @@ impl PackingApp {
             }
             Input::LanguageSelected(lang) => {
                 self.selected_language = lang;
+                let is_node = self.active_algo_tab()
+                    .map(|t| t.selection_regions.iter().any(|r| r.is_inherited))
+                    .unwrap_or(false);
+                let default_code = match (lang, is_node) {
+                    (CodeLanguage::Cpp, false) => CPP_ROOT_CODE,
+                    (CodeLanguage::Cpp, true)  => CPP_NODE_CODE,
+                    (_, false) => ROOT_CODE,
+                    (_, true)  => NODE_CODE,
+                };
+                self.code_editor_content = text_editor::Content::with_text(default_code);
+                if let Some(tab) = self.active_algo_tab_mut() {
+                    tab.code = default_code.to_string();
+                }
             }
             Input::RunCode(which_tab) => {
                 if which_tab == 1 {
@@ -3535,7 +3599,13 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
         };
-        let code_panel_content = build_code_panel(&editor_state);
+        let code_panel_content = {
+            use iced::widget::mouse_area;
+            let inner = build_code_panel(&editor_state);
+            mouse_area(inner)
+                .on_move(|p| Input::PanelResizeMove(p.y))
+                .on_release(Input::PanelResizeEnd)
+        };
 
         let right_panel_content: Element<'_, Input> = match self.active_tab {
             RightPanelTab::Visualization => {

@@ -167,8 +167,6 @@ int main(int argc, char* argv[]) {
 
     fn get_repack_main() -> &'static str {
         r#"
-struct Obstacle { double x1, x2, y1, y2; };
-
 std::vector<std::tuple<int, int, int>> parseRectangles(const std::string& json) {
     std::vector<std::tuple<int, int, int>> result;
     std::string s = json;
@@ -256,10 +254,19 @@ int main(int argc, char* argv[]) {
         "#include <iostream>\n#include <vector>\n#include <tuple>\n#include <string>\n#include <sstream>\n#include <iomanip>\n"
     }
 
+    fn repack_preamble() -> &'static str {
+        "struct Obstacle { double x1, x2, y1, y2; };\n"
+    }
+
+    fn runner_utils_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runner_utils")
+    }
+
     fn compile(source_path: &std::path::Path, binary_path: &std::path::Path) -> Option<RunResult> {
         let result = std::process::Command::new("g++")
             .arg("-std=c++17")
             .arg("-O2")
+            .arg("-I").arg(Self::runner_utils_dir())
             .arg("-o").arg(binary_path)
             .arg(source_path)
             .output();
@@ -329,7 +336,7 @@ impl LanguageRunner for CppRunner {
         let source_path = temp_dir.join("repack_sol.cpp");
         let binary_path = temp_dir.join("repack_sol");
 
-        let full_code = format!("{}\n{}\n{}", Self::cpp_includes(), code, Self::get_repack_main());
+        let full_code = format!("{}\n{}\n{}\n{}", Self::cpp_includes(), Self::repack_preamble(), code, Self::get_repack_main());
         if let Err(e) = std::fs::write(&source_path, &full_code) {
             return RunResult::Error {
                 errors: vec![format!("Failed to write source file: {}", e)],

@@ -30,6 +30,16 @@ pub enum CodeLanguage {
     Java,
 }
 
+impl std::fmt::Display for CodeLanguage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodeLanguage::Python => write!(f, "Python"),
+            CodeLanguage::Cpp => write!(f, "C++"),
+            CodeLanguage::Java => write!(f, "Java"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
     CreateSingleTestCase,
