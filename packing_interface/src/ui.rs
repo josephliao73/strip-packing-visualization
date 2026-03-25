@@ -5,7 +5,7 @@ use iced::widget::{button, checkbox, column, container, row, text, text_input, t
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement, WorkspaceTab};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 use rand::Rng;
@@ -102,7 +102,7 @@ impl Default for PackingApp {
             error_message: None,
             algo_tabs: vec![AlgoTab {
                 id: 0,
-                name: "Root".to_string(),
+                name: "Base Layout".to_string(),
                 selected_indices: Vec::new(),
                 repacked_indices: Vec::new(),
                 obstacle_spaces: Vec::new(),
@@ -132,13 +132,13 @@ impl Default for PackingApp {
             dragged_rect_offset_y: 0.0,
             snap_preview: None,
             selected_rects: HashSet::new(),
-            active_tab: RightPanelTab::Visualization,
+            active_tab: RightPanelTab::CodeEditor,
             current_testcase: None,
             testcase_message: None,
             code_editor_content: text_editor::Content::with_text(ROOT_CODE),
             selected_language: CodeLanguage::Python,
             bottom_panel_visible: true,
-            bottom_panel_tab: BottomPanelTab::Problems,
+            bottom_panel_tab: BottomPanelTab::Output,
             code_errors: Vec::new(),
             code_output_json: None,
             settings: Settings {
@@ -159,6 +159,8 @@ impl Default for PackingApp {
             num_test_cases_input: String::new(),
             input_size_input: String::new(),
             unique_types_input: String::new(),
+            single_input_size_input: String::new(),
+            single_unique_types_input: String::new(),
             display_visual: false,
             multiple_test_cases: Vec::new(),
             multiple_testcase_message: None,
@@ -167,6 +169,7 @@ impl Default for PackingApp {
             bottom_panel_height: 150.0,
             is_resizing_panel: false,
             panel_drag_last_y: 0.0,
+            workspace_tab: WorkspaceTab::CreateSingleTestCase,
         }
     }
 }
@@ -250,6 +253,16 @@ impl PackingApp {
                     self.unique_types_input = val;
                 }
             }
+            Input::SingleInputSizeChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.single_input_size_input = val;
+                }
+            }
+            Input::SingleUniqueTypesChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.single_unique_types_input = val;
+                }
+            }
 	    Input::DisplayVisual(val) => {
 		self.display_visual = val;
 	    }
@@ -276,6 +289,9 @@ impl PackingApp {
             }
             Input::CreateNewTab => {
                 self.create_new_tab(None);
+            }
+            Input::WorkspaceTabSelected(tab) => {
+                self.workspace_tab = tab;
             }
             Input::DisplayMultipleResult(idx) => {
                 if let Some(result) = self.multiple_run_results.get(idx) {
@@ -809,7 +825,7 @@ impl PackingApp {
 						self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
 						self.code_errors = errors;
 						self.code_output_json = None;
-						self.bottom_panel_tab = BottomPanelTab::Problems;
+						self.bottom_panel_tab = BottomPanelTab::Output;
 					    }
 					}
 				    } else {
@@ -836,7 +852,9 @@ impl PackingApp {
                     let n = results.len();
                     self.multiple_results_expanded = vec![false; n];
                     self.multiple_run_results = results;
+                    self.active_tab = RightPanelTab::CodeEditor;
                     self.bottom_panel_tab = BottomPanelTab::Output;
+                    self.error_message = Some(format!("✓ Batch run completed for {} test cases", n));
                 }
             }
             Input::BottomPanelTabSelected(tab) => {
@@ -893,8 +911,8 @@ impl PackingApp {
             }
             Input::GenerateTestCase => {
                 let mut rng = rand::rng();
-                let input_size = self.input_size_input.parse::<i32>().ok();
-                let unique_types = self.unique_types_input.parse::<usize>().ok();
+                let input_size = self.single_input_size_input.parse::<i32>().ok();
+                let unique_types = self.single_unique_types_input.parse::<usize>().ok();
                 let testcase = generate_random_test_case(&mut rng, 1, input_size, unique_types);
                 let msg = format!(
                     "Generated: {} rectangles, {} types, bin width {}",
@@ -910,6 +928,8 @@ impl PackingApp {
                 let input_size = self.input_size_input.parse::<i32>().ok();
                 let unique_types = self.unique_types_input.parse::<usize>().ok();
                 self.multiple_test_cases = generate_random_test_case(&mut rng, n, input_size, unique_types);
+                self.multiple_run_results.clear();
+                self.multiple_results_expanded.clear();
                 let msg = format!("Generated: {} test cases", self.multiple_test_cases.len());
                 self.multiple_testcase_message = Some(msg);
             }
@@ -1083,7 +1103,7 @@ impl PackingApp {
                     }
 
                     let current_tab_name = &self.algo_tabs[tab_idx].name;
-                    let is_root = current_tab_name == "Root";
+                    let is_root = current_tab_name == "Base Layout";
 
                     let prefix = if is_root {
                         "Node ".to_string()
@@ -1677,7 +1697,7 @@ fn snap_to_rectangles(
                 self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
                 self.code_errors = errors;
                 self.code_output_json = None;
-                self.bottom_panel_tab = BottomPanelTab::Problems;
+                self.bottom_panel_tab = BottomPanelTab::Output;
             }
         }
     }
@@ -1801,8 +1821,8 @@ fn snap_to_rectangles(
     }
 
     fn create_new_tab(&mut self, output: Option<&AlgorithmOutput>) -> u64 {
-	let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Root")).count();
-	let name = format!("Root {}", root_count + 1);
+	let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Base Layout")).count();
+	let name = format!("Base Layout {}", root_count + 1);
 	let new_id = self.next_algo_tab_id;
 	self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
 	self.algo_tabs.push(AlgoTab {
@@ -2066,28 +2086,36 @@ fn snap_to_rectangles(
     pub fn view(&self) -> Element<'_, Input> {
         let ui_font = Font::default();
         
-        let title = text("Rectangle Packing Configuration")
-            .size(22)
+        let title = text("Input")
+            .size(26)
             .font(ui_font);
-        
+
         let header = column![
             title,
+            text("Manual input and generated test cases live in the same workspace.")
+                .size(13)
+                .font(ui_font)
+                .style(move |_theme: &Theme| {
+                    text::Style {
+                        color: Some(Color::from_rgb(0.52, 0.54, 0.60)),
+                    }
+                }),
         ]
-        .spacing(4);
+        .spacing(6);
         
         let w_label = text("Bin Width")
             .size(12)
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                    color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                 }
             });
         
         let w_input = text_input("e.g., 100", &self.w_input)
             .on_input(Input::WChanged)
-            .size(13)
-            .padding(10)
+            .size(14)
+            .padding(11)
             .width(Length::Fill)
             .font(ui_font);
 
@@ -2109,14 +2137,14 @@ fn snap_to_rectangles(
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                    color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                 }
             });
 
         let n_input = text_input("Optional", &self.n_input)
             .on_input(Input::NChanged)
-            .size(13)
-            .padding(10)
+            .size(14)
+            .padding(11)
             .width(Length::Fill)
             .font(ui_font);
 
@@ -2138,14 +2166,14 @@ fn snap_to_rectangles(
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                    color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                 }
             });
 
         let k_input = text_input("Optional", &self.k_input)
             .on_input(Input::KChanged)
-            .size(13)
-            .padding(10)
+            .size(14)
+            .padding(11)
             .width(Length::Fill)
             .font(ui_font);
 
@@ -2176,7 +2204,7 @@ fn snap_to_rectangles(
         let autofill_container = container(autofill_checkbox)
             .padding([8, 0]);
         
-        let divider = container(
+        let _divider: Element<'_, Input> = container(
             container(text(""))
                 .width(Length::Fill)
                 .height(1)
@@ -2186,12 +2214,13 @@ fn snap_to_rectangles(
                         ..Default::default()
                     }
                 })
-        );
+        )
+        .into();
         
         let import_button = button(
             container(
                 text("Import Configuration")
-                    .size(13)
+                    .size(14)
                     .font(ui_font)
             )
             .center_x(Length::Fill)
@@ -2224,7 +2253,7 @@ fn snap_to_rectangles(
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                    color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                 }
             });
 
@@ -2245,9 +2274,9 @@ fn snap_to_rectangles(
         
         let rectangle_editor = text_editor(&self.rectangle_data)
             .on_action(Input::RectangleDataAction)
-            .height(180)
+            .height(190)
             .padding(12)
-            .size(13)
+            .size(14)
             .font(ui_font);
 
         let editor_container = container(rectangle_editor)
@@ -2281,7 +2310,7 @@ fn snap_to_rectangles(
         let export_button = button(
             container(
                 text("Export Algorithm Input")
-                    .size(13)
+                    .size(14)
                     .font(ui_font)
             )
             .center_x(Length::Fill)
@@ -2356,8 +2385,8 @@ fn snap_to_rectangles(
 
         let import_output_json_button = button(
             container(
-                text("Import Output JSON")
-                    .size(13)
+                text("Load Output JSON")
+                    .size(14)
                     .font(ui_font)
             )
             .center_x(Length::Fill)
@@ -2389,7 +2418,7 @@ fn snap_to_rectangles(
             .font(ui_font)
             .style(|_theme: &Theme| {
                 text::Style {
-                    color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                    color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                 }
             });
 
@@ -2431,157 +2460,57 @@ fn snap_to_rectangles(
                 }
             });
 
-        let settings_panel_visible = self.settings_panel_visible;
-        let gear_button = button(
-            container(
-                column![
-                    row![
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                        column![].width(2),
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                    ],
-                    column![].height(2),
-                    row![
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                        column![].width(2),
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                    ],
-                    column![].height(2),
-                    row![
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                        column![].width(2),
-                        container(text("")).width(2).height(2).style(|_theme: &Theme| {
-                            container::Style {
-                                background: Some(Color::from_rgb(0.6, 0.6, 0.65).into()),
-                                border: iced::Border { radius: 1.0.into(), ..Default::default() },
-                                ..Default::default()
-                            }
-                        }),
-                    ],
-                ]
-            )
-            .padding(4)
-        )
-        .on_press(Input::ToggleSettingsPanel)
-        .padding(4)
-        .style(move |_theme: &Theme, status| {
-            let base_bg = if settings_panel_visible {
-                Color::from_rgb(0.2, 0.25, 0.35)
-            } else {
-                Color::from_rgba(0.12, 0.12, 0.15, 0.9)
-            };
-            let hover_bg = Color::from_rgba(0.22, 0.22, 0.28, 0.95);
-
-            button::Style {
-                background: Some(match status {
-                    button::Status::Hovered => hover_bg.into(),
-                    _ => base_bg.into(),
-                }),
-                border: iced::Border {
-                    color: Color::from_rgb(0.3, 0.3, 0.35),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                text_color: Color::from_rgb(0.75, 0.75, 0.8),
-                ..Default::default()
-            }
-        });
-
         let area_select_enabled = self.settings.area_select_enabled;
         let snap_to_rects_enabled = self.settings.snap_to_rectangles_enabled;
         let auto_minimize_enabled = self.settings.auto_minimize_height;
 
-        let settings_popup: Element<'_, Input> = if self.settings_panel_visible {
-            let area_select_checkbox = checkbox("Area Selection (Right-drag)", area_select_enabled)
-                .on_toggle(Input::ToggleAreaSelectEnabled)
-                .size(14)
-                .font(ui_font)
-                .text_size(11);
+        let area_select_checkbox = checkbox("Area Select", area_select_enabled)
+            .on_toggle(Input::ToggleAreaSelectEnabled)
+            .size(14)
+            .font(ui_font)
+            .text_size(11);
 
-            let snap_checkbox = checkbox("Snap to Edge", snap_to_rects_enabled)
-                .on_toggle(Input::ToggleSnapToRectangles)
-                .size(14)
-                .font(ui_font)
-                .text_size(11);
+        let snap_checkbox = checkbox("Snap to Edge", snap_to_rects_enabled)
+            .on_toggle(Input::ToggleSnapToRectangles)
+            .size(14)
+            .font(ui_font)
+            .text_size(11);
 
-            let auto_minimize_checkbox = checkbox("Auto Minimize Height", auto_minimize_enabled)
-                .on_toggle(Input::ToggleAutoMinimizeHeight)
-                .size(14)
-                .font(ui_font)
-                .text_size(11);
+        let auto_minimize_checkbox = checkbox("Auto Min Height", auto_minimize_enabled)
+            .on_toggle(Input::ToggleAutoMinimizeHeight)
+            .size(14)
+            .font(ui_font)
+            .text_size(11);
 
-            container(
-                column![
-                    text("Settings").size(12).font(ui_font).style(|_theme: &Theme| {
-                        text::Style {
-                            color: Some(Color::from_rgb(0.7, 0.7, 0.75)),
-                        }
-                    }),
-                    column![].height(8),
-                    area_select_checkbox,
-                    column![].height(4),
-                    snap_checkbox,
-                    column![].height(4),
-                    auto_minimize_checkbox,
-                ]
-                .spacing(4)
-            )
-            .padding(12)
-            .style(|_theme: &Theme| {
-                container::Style {
-                    background: Some(Color::from_rgb(0.08, 0.08, 0.1).into()),
-                    border: iced::Border {
-                        color: Color::from_rgb(0.25, 0.25, 0.32),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
-        } else {
-            column![].into()
-        };
-
-        let settings_corner: Element<'_, Input> = column![
+        let canvas_toolbar: Element<'_, Input> = container(
             row![
+                area_select_checkbox,
+                snap_checkbox,
+                auto_minimize_checkbox,
                 column![].width(Length::Fill),
-                gear_button,
-            ],
-            settings_popup,
-        ]
-        .spacing(4)
-        .align_x(Alignment::End)
+                text("Drag to pan. Right-drag to select. Right-click a region for actions.")
+                    .size(10)
+                    .font(ui_font)
+                    .style(|_theme: &Theme| text::Style {
+                        color: Some(Color::from_rgb(0.52, 0.54, 0.60)),
+                    }),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center)
+        )
+        .padding([10, 12])
+        .width(Length::Fill)
+        .style(|_theme: &Theme| {
+            container::Style {
+                background: Some(Color::from_rgb(0.08, 0.08, 0.1).into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.2, 0.2, 0.26),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            }
+        })
         .into();
 
 let current_tab_regions: &[SelectionRegion] = self.algo_tabs.iter()
@@ -2670,7 +2599,7 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
     } else {
         container(text("Hover over a rectangle to see dimensions").size(12).style(|_theme: &Theme| {
             text::Style {
-                color: Some(Color::from_rgb(0.45, 0.47, 0.52)),
+                color: Some(Color::from_rgb(0.52, 0.54, 0.60)),
             }
         }))
         .padding(10)
@@ -2771,15 +2700,12 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
     };
 
     column![
+        canvas_toolbar,
         container(
             iced::widget::stack![
                 container(canvas)
                     .width(Length::Fill)
                     .height(Length::Fill),
-                container(settings_corner)
-                    .width(Length::Fill)
-                    .padding(8)
-                    .align_right(Length::Fill),
                 column![
                     column![].height(Length::Fixed(self.context_menu_position.1)),
                     row![
@@ -2806,20 +2732,21 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
     .spacing(8)
         } else {
             column![
+                canvas_toolbar,
                 container(
                     iced::widget::stack![
                         container(
                             column![
-                                text("Visualization Area")
+                                text("Canvas")
                                     .size(16)
                                     .font(ui_font)
                                     .style(|_theme: &Theme| {
                                         text::Style {
-                                            color: Some(Color::from_rgb(0.533, 0.533, 0.627)),
+                                            color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
                                         }
                                     }),
                                 column![].height(8),
-                                text("Import Output JSON or Run Custom Algorithm to see the packing result")
+                                text("Load output JSON or run the current algorithm to inspect a layout here")
                                     .size(12)
                                     .font(ui_font)
                                     .style(|_theme: &Theme| {
@@ -2834,10 +2761,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                         .height(Length::Fill)
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
-                        container(settings_corner)
-                            .width(Length::Fill)
-                            .padding(8)
-                            .align_right(Length::Fill),
                     ]
                 )
                 .width(Length::Fill)
@@ -2891,48 +2814,450 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             container(text("").size(1))
         };
 
-        let input_section = column![
-            header,
-            column![].height(16),
+        let section_title = |label: &'static str| {
+            text(label)
+                .size(14)
+                .font(ui_font)
+                .style(|_theme: &Theme| {
+                    text::Style {
+                        color: Some(Color::from_rgb(0.88, 0.90, 0.96)),
+                    }
+                })
+        };
+
+        let helper_text = |label: &'static str| {
+            text(label)
+                .size(13)
+                .font(ui_font)
+                .style(|_theme: &Theme| {
+                    text::Style {
+                        color: Some(Color::from_rgb(0.52, 0.54, 0.62)),
+                    }
+                })
+        };
+
+        let workspace_tab_button = |label: &'static str, tab: WorkspaceTab, active_tab: WorkspaceTab| {
+            let is_active = tab == active_tab;
+            button(
+                column![
+                    text(label).size(12).font(ui_font),
+                    container(text(""))
+                        .width(Length::Fill)
+                        .height(2)
+                        .style(move |_theme: &Theme| {
+                            container::Style {
+                                background: if is_active {
+                                    Some(Color::from_rgb(0.44, 0.58, 0.84).into())
+                                } else {
+                                    None
+                                },
+                                ..Default::default()
+                            }
+                        }),
+                ]
+                .spacing(6)
+                .align_x(Alignment::Center)
+                .width(Length::Fill)
+            )
+            .on_press(Input::WorkspaceTabSelected(tab))
+            .padding([10, 20])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => Color::from_rgb(0.1, 0.1, 0.12),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    text_color: if is_active {
+                        Color::from_rgb(0.92, 0.95, 1.0)
+                    } else {
+                        Color::from_rgb(0.55, 0.56, 0.63)
+                    },
+                    ..Default::default()
+                }
+            })
+        };
+
+        let workspace_tabs = container(
+            row![
+                workspace_tab_button(
+                    "Create Single Test Case",
+                    WorkspaceTab::CreateSingleTestCase,
+                    self.workspace_tab,
+                ),
+                workspace_tab_button(
+                    "Import/Generate Test Cases",
+                    WorkspaceTab::ImportGenerateTestCases,
+                    self.workspace_tab,
+                ),
+            ]
+            .spacing(0)
+            .width(Length::Fill)
+        )
+        .style(|_theme: &Theme| {
+            container::Style {
+                background: Some(Color::from_rgb(0.055, 0.055, 0.07).into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.12, 0.12, 0.15),
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .width(Length::Fill)
+        .padding(0);
+
+        let create_single_case_content = column![
+            section_title("Create Single Test Case"),
+            helper_text("Define a case directly by entering bin settings and rectangle rows."),
+            column![].height(8),
             column![
                 w_label,
-                column![].height(6),
+                column![].height(5),
                 w_input_container,
-            ].spacing(0),
-            column![].height(12),
-            column![
-                n_label,
-                column![].height(6),
-                n_input_container,
-            ].spacing(0),
-            column![].height(12),
-            column![
-                k_label,
-                column![].height(6),
-                k_input_container,
-            ].spacing(0),
-            column![].height(12),
-            autofill_container,
-            column![].height(16),
-            divider,
-            column![].height(16),
+            ]
+            .spacing(0),
+            column![].height(10),
             row![
-                import_button,
-            ].spacing(8),
-            column![].height(16),
+                column![
+                    n_label,
+                    column![].height(5),
+                    n_input_container,
+                ]
+                .width(Length::Fill),
+                column![
+                    k_label,
+                    column![].height(5),
+                    k_input_container,
+                ]
+                .width(Length::Fill),
+            ]
+            .spacing(10),
+            column![].height(10),
+            autofill_container,
+            column![].height(12),
+            row![
+                import_button.width(Length::FillPortion(1)),
+                export_button.width(Length::FillPortion(1)),
+            ]
+            .spacing(8),
+            column![].height(12),
             editor_header,
             column![].height(6),
             editor_with_info,
-            column![].height(12),
-            export_button,
-            column![].height(12),
+            column![].height(10),
             message_display,
         ]
         .spacing(0)
-        .padding(20)
         .align_x(Alignment::Start);
 
-        let input_container = container(input_section)
+        let is_root_workspace = self.active_algo_tab()
+            .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
+            .unwrap_or(true);
+
+        let import_generate_content: Element<'_, Input> = if is_root_workspace {
+            // ── shared button styles ──────────────────────────────────────
+            let secondary_btn_style = |_theme: &Theme, status| button::Style {
+                background: Some(match status {
+                    button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.22).into(),
+                    _ => Color::from_rgb(0.12, 0.12, 0.16).into(),
+                }),
+                border: iced::Border {
+                    color: Color::from_rgb(0.24, 0.24, 0.30),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                text_color: Color::from_rgb(0.78, 0.80, 0.88),
+                ..Default::default()
+            };
+
+            let field_label = |label: &'static str| {
+                text(label)
+                    .size(12)
+                    .font(ui_font)
+                    .style(|_theme: &Theme| text::Style {
+                        color: Some(Color::from_rgb(0.55, 0.57, 0.65)),
+                    })
+            };
+
+            let section_box_style = |_theme: &Theme| container::Style {
+                background: Some(Color::from_rgb(0.06, 0.06, 0.08).into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.16, 0.16, 0.20),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            };
+
+            // ── single case ───────────────────────────────────────────────
+            let import_test_case_button = button(text("Import").size(13).font(ui_font))
+                .on_press(Input::ImportTestCase)
+                .padding([9, 16])
+                .width(Length::Shrink)
+                .style(secondary_btn_style);
+
+            let generate_test_case_button = button(text("Generate Random").size(13).font(ui_font))
+                .on_press(Input::GenerateTestCase)
+                .padding([9, 16])
+                .width(Length::Shrink)
+                .style(secondary_btn_style);
+
+            let single_status: Element<'_, Input> = {
+                let (icon, msg, color) = if let Some(tc) = &self.current_testcase {
+                    (
+                        "●",
+                        format!("{} rectangles · {} types · bin width {}",
+                            tc.number_of_rectangles,
+                            tc.number_of_types_of_rectangles,
+                            tc.width_of_bin),
+                        Color::from_rgb(0.55, 0.75, 0.60),
+                    )
+                } else {
+                    ("○", "No test case loaded".to_string(), Color::from_rgb(0.42, 0.44, 0.52))
+                };
+                row![
+                    text(icon).size(10).font(ui_font).style(move |_theme: &Theme| text::Style { color: Some(color) }),
+                    text(msg).size(12).font(ui_font).style(move |_theme: &Theme| text::Style { color: Some(color) }),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+            };
+
+            let single_message: Element<'_, Input> = if let Some(msg) = &self.testcase_message {
+                let color = if msg.starts_with("✓") {
+                    Color::from_rgb(0.38, 0.78, 0.48)
+                } else {
+                    Color::from_rgb(0.88, 0.42, 0.42)
+                };
+                text(msg).size(12).font(ui_font)
+                    .style(move |_: &Theme| text::Style { color: Some(color) })
+                    .into()
+            } else {
+                column![].into()
+            };
+
+            // ── batch ─────────────────────────────────────────────────────
+            let input_size_placeholder = if self.input_size_input.is_empty() { "100" } else { "" };
+            let input_size_field = text_input(input_size_placeholder, &self.input_size_input)
+                .on_input(Input::InputSizeChanged)
+                .size(13)
+                .padding([9, 12])
+                .width(Length::FillPortion(1));
+
+            let unique_types_field = text_input("Any", &self.unique_types_input)
+                .on_input(Input::UniqueTypesChanged)
+                .size(13)
+                .padding([9, 12])
+                .width(Length::FillPortion(1));
+
+            let batch_count_field = text_input("--", &self.num_test_cases_input)
+                .on_input(Input::NumTestCasesChanged)
+                .size(13)
+                .padding([9, 12])
+                .width(Length::FillPortion(1));
+
+            let batch_count = self.num_test_cases_input.parse::<i32>().unwrap_or(0);
+            let batch_enabled = batch_count > 0;
+            let batch_button = {
+                let mut b = button(text("Generate Batch").size(13).font(ui_font))
+                    .padding([9, 18])
+                    .width(Length::Shrink)
+                    .style(move |_theme: &Theme, status| button::Style {
+                        background: Some(if batch_enabled {
+                            match status {
+                                button::Status::Hovered => Color::from_rgb(0.20, 0.28, 0.46).into(),
+                                _ => Color::from_rgb(0.15, 0.22, 0.38).into(),
+                            }
+                        } else {
+                            Color::from_rgb(0.10, 0.10, 0.13).into()
+                        }),
+                        border: iced::Border {
+                            color: if batch_enabled { Color::from_rgb(0.30, 0.40, 0.62) } else { Color::from_rgb(0.16, 0.16, 0.20) },
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        text_color: if batch_enabled { Color::from_rgb(0.78, 0.86, 0.96) } else { Color::from_rgb(0.36, 0.36, 0.42) },
+                        ..Default::default()
+                    });
+                if batch_enabled {
+                    b = b.on_press(Input::GenerateMultipleTestCases(batch_count));
+                }
+                b
+            };
+
+            let batch_status: Element<'_, Input> = {
+                let (icon, msg, color) = if self.multiple_test_cases.is_empty() {
+                    ("○", "No batch generated".to_string(), Color::from_rgb(0.42, 0.44, 0.52))
+                } else {
+                    ("●", format!("{} cases ready to run", self.multiple_test_cases.len()), Color::from_rgb(0.55, 0.75, 0.60))
+                };
+                row![
+                    text(icon).size(10).font(ui_font).style(move |_: &Theme| text::Style { color: Some(color) }),
+                    text(msg).size(12).font(ui_font).style(move |_: &Theme| text::Style { color: Some(color) }),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+            };
+
+            let run_batch_row: Element<'_, Input> = if !self.multiple_test_cases.is_empty() {
+                let run_batch_button = button(text("Run Batch").size(13).font(ui_font))
+                    .on_press(Input::RunCode(2))
+                    .padding([9, 18])
+                    .style(|_theme: &Theme, status| button::Style {
+                        background: Some(match status {
+                            button::Status::Hovered => Color::from_rgb(0.20, 0.50, 0.30).into(),
+                            _ => Color::from_rgb(0.15, 0.42, 0.24).into(),
+                        }),
+                        border: iced::Border {
+                            color: Color::from_rgb(0.25, 0.52, 0.34),
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        text_color: Color::from_rgb(0.88, 0.96, 0.90),
+                        ..Default::default()
+                    });
+                row![
+                    column![].width(Length::Fill),
+                    run_batch_button,
+                ]
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                column![].into()
+            };
+
+            column![
+                section_title("Import / Generate Test Cases"),
+                column![].height(4),
+                helper_text("Load cases individually or generate a batch for multi-run analysis."),
+                column![].height(16),
+
+                // ── single case box ───────────────────────────────────────
+                container(
+                    column![
+                        text("Single Case").size(12).font(ui_font)
+                            .style(|_: &Theme| text::Style { color: Some(Color::from_rgb(0.62, 0.65, 0.76)) }),
+                        column![].height(10),
+                        row![
+                            column![
+                                field_label("Input size"),
+                                column![].height(5),
+                                text_input(if self.single_input_size_input.is_empty() { "100" } else { "" }, &self.single_input_size_input)
+                                    .on_input(Input::SingleInputSizeChanged)
+                                    .size(13).padding([9, 12]).width(Length::Fill),
+                            ].width(Length::Fill),
+                            column![
+                                field_label("Unique types"),
+                                column![].height(5),
+                                text_input("Any", &self.single_unique_types_input)
+                                    .on_input(Input::SingleUniqueTypesChanged)
+                                    .size(13).padding([9, 12]).width(Length::Fill),
+                            ].width(Length::Fill),
+                        ]
+                        .spacing(10),
+                        column![].height(10),
+                        row![import_test_case_button, generate_test_case_button]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                        column![].height(12),
+                        single_status,
+                        single_message,
+                    ]
+                    .spacing(0)
+                )
+                .padding(16)
+                .width(Length::Fill)
+                .style(section_box_style),
+
+                column![].height(12),
+
+                // ── batch box ─────────────────────────────────────────────
+                container(
+                    column![
+                        text("Batch Run").size(12).font(ui_font)
+                            .style(|_: &Theme| text::Style { color: Some(Color::from_rgb(0.62, 0.65, 0.76)) }),
+                        column![].height(10),
+                        row![
+                            column![field_label("Input size"),  column![].height(5), input_size_field ].width(Length::Fill),
+                            column![field_label("Unique types"), column![].height(5), unique_types_field].width(Length::Fill),
+                            column![field_label("Count"),        column![].height(5), batch_count_field ].width(Length::Fill),
+                        ]
+                        .spacing(10),
+                        column![].height(12),
+                        row![
+                            batch_status,
+                            column![].width(Length::Fill),
+                            batch_button,
+                        ]
+                        .align_y(Alignment::Center),
+                        run_batch_row,
+                    ]
+                    .spacing(0)
+                )
+                .padding(16)
+                .width(Length::Fill)
+                .style(section_box_style),
+
+                column![].height(Length::Fill),
+            ]
+            .spacing(0)
+            .align_x(Alignment::Start)
+            .height(Length::Fill)
+            .into()
+        } else {
+            column![
+                section_title("Import/Generate Test Cases"),
+                helper_text("This layout repacks the inherited selection region from its parent layout."),
+                column![].height(8),
+                text("Switch to the algorithm panel and press Run to apply your repacking code.")
+                    .size(11)
+                    .font(ui_font)
+                    .style(|_theme: &Theme| text::Style {
+                        color: Some(Color::from_rgb(0.75, 0.82, 0.9)),
+                    }),
+            ]
+            .spacing(0)
+            .align_x(Alignment::Start)
+            .into()
+        };
+
+        let workspace_content: Element<'_, Input> = match self.workspace_tab {
+            WorkspaceTab::CreateSingleTestCase => container(create_single_case_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            WorkspaceTab::ImportGenerateTestCases => container(import_generate_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        };
+
+        let workspace_content_frame = container(workspace_content)
+            .width(Length::Fill)
+            .height(Length::Fixed(560.0));
+
+        let unified_workspace_section = column![
+            header,
+            column![].height(16),
+            workspace_tabs,
+            column![].height(16),
+            workspace_content_frame,
+        ]
+        .spacing(0)
+        .align_x(Alignment::Start)
+        .padding(24);
+
+        let input_container = container(unified_workspace_section)
             .style(|_theme: &Theme| {
                 container::Style {
                     background: Some(Color::from_rgb(0.08, 0.08, 0.1).into()),
@@ -2989,14 +3314,14 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
 
         let viz_tab = button(
             column![
-                text("Visualization").size(12).font(ui_font),
+                text("Canvas").size(12).font(ui_font),
                 container(text(""))
                     .width(Length::Fill)
                     .height(2)
                     .style(move |_theme: &Theme| {
                         container::Style {
                             background: if viz_tab_active {
-                                Some(Color::from_rgb(0.6, 0.6, 0.65).into())
+                                Some(Color::from_rgb(0.44, 0.58, 0.84).into())
                             } else {
                                 None
                             },
@@ -3022,9 +3347,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                     radius: 4.0.into(),
                 },
                 text_color: if viz_tab_active {
-                    Color::from_rgb(0.9, 0.9, 0.92)
+                    Color::from_rgb(0.92, 0.95, 1.0)
                 } else {
-                    Color::from_rgb(0.5, 0.5, 0.55)
+                    Color::from_rgb(0.55, 0.56, 0.63)
                 },
                 ..Default::default()
             }
@@ -3032,14 +3357,14 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
 
         let code_tab = button(
             column![
-                text("Code").size(12).font(ui_font),
+                text("Algorithm").size(12).font(ui_font),
                 container(text(""))
                     .width(Length::Fill)
                     .height(2)
                     .style(move |_theme: &Theme| {
                         container::Style {
                             background: if code_tab_active {
-                                Some(Color::from_rgb(0.6, 0.6, 0.65).into())
+                                Some(Color::from_rgb(0.44, 0.58, 0.84).into())
                             } else {
                                 None
                             },
@@ -3065,9 +3390,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                     radius: 4.0.into(),
                 },
                 text_color: if code_tab_active {
-                    Color::from_rgb(0.9, 0.9, 0.92)
+                    Color::from_rgb(0.92, 0.95, 1.0)
                 } else {
-                    Color::from_rgb(0.5, 0.5, 0.55)
+                    Color::from_rgb(0.55, 0.56, 0.63)
                 },
                 ..Default::default()
             }
@@ -3138,9 +3463,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                                 },
                             },
                             text_color: if is_active {
-                                Color::from_rgb(0.92, 0.92, 0.94)
+                                Color::from_rgb(0.92, 0.95, 1.0)
                             } else {
-                                Color::from_rgb(0.55, 0.55, 0.6)
+                                Color::from_rgb(0.55, 0.56, 0.63)
                             },
                             ..Default::default()
                         }
@@ -3195,7 +3520,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             bottom_panel_tab: self.bottom_panel_tab,
             code_errors: &self.code_errors,
             code_output_json: self.code_output_json.as_deref(),
-            show_visualization_button: false,
             testcase_message: self.testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
             is_root: self.active_algo_tab()
@@ -3204,19 +3528,14 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             num_test_cases_input: &self.num_test_cases_input,
             input_size_input: &self.input_size_input,
             unique_types_input: &self.unique_types_input,
-            display_visual: self.display_visual,
             multiple_testcase_message: self.multiple_testcase_message.as_deref(),
+            has_single_testcase: self.current_testcase.is_some(),
+            has_multiple_testcases: !self.multiple_test_cases.is_empty(),
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
         };
-        let code_panel_content = {
-            use iced::widget::mouse_area;
-            let inner = build_code_panel(&editor_state);
-            mouse_area(inner)
-                .on_move(|p| Input::PanelResizeMove(p.y))
-                .on_release(Input::PanelResizeEnd)
-        };
+        let code_panel_content = build_code_panel(&editor_state);
 
         let right_panel_content: Element<'_, Input> = match self.active_tab {
             RightPanelTab::Visualization => {
@@ -3281,13 +3600,13 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             left_panel_container,
             right_panel,
         ]
-        .spacing(16)
+        .spacing(18)
         .height(Length::Fill);
-        
+
         container(main_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(16)
+            .padding(18)
             .style(|_theme: &Theme| {
                 container::Style {
                     background: Some(Color::from_rgb(0.039, 0.039, 0.047).into()),

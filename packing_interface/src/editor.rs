@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input, checkbox};
+use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};
 use serde_json;
 use iced::highlighter::Theme as HighlighterTheme;
 use iced::{Element, Theme, Alignment, Length, Color, Font};
@@ -11,15 +11,15 @@ pub struct EditorState<'a> {
     pub bottom_panel_tab: BottomPanelTab,
     pub code_errors: &'a [String],
     pub code_output_json: Option<&'a str>,
-    pub show_visualization_button: bool,
     pub testcase_message: Option<&'a str>,
     pub multiple_testcase_message: Option<&'a str>,
     pub testcase: Option<&'a JsonInput>,
     pub is_root: bool,  // True for root tab, false for nodes (nodes don't have test cases)
+    pub has_single_testcase: bool,
+    pub has_multiple_testcases: bool,
     pub num_test_cases_input: &'a str,
     pub input_size_input: &'a str,
     pub unique_types_input: &'a str,
-    pub display_visual: bool,
     pub multiple_run_results: &'a [MultipleRunResult],
     pub multiple_results_expanded: &'a [bool],
     pub bottom_panel_height: f32,
@@ -33,16 +33,16 @@ fn build_language_selector(language: CodeLanguage) -> Element<'static, Input> {
     };
 
     let language_label = text(label)
-        .size(12)
+        .size(13)
         .font(Font::default())
         .style(|_theme: &Theme| {
             text::Style {
-                color: Some(Color::from_rgb(0.55, 0.55, 0.6)),
+                color: Some(Color::from_rgb(0.62, 0.65, 0.76)),
             }
         });
 
     container(language_label)
-        .padding([6, 12])
+        .padding([8, 14])
         .style(|_theme: &Theme| {
             container::Style {
                 background: Some(Color::from_rgb(0.1, 0.1, 0.13).into()),
@@ -62,7 +62,7 @@ fn build_save_output_json_button(enabled: bool) -> Element<'static, Input> {
 
     button(
         row![
-            text("Save Output Json").size(11).font(ui_font),
+            text("Save Results JSON").size(11).font(ui_font),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
@@ -103,60 +103,12 @@ fn build_save_output_json_button(enabled: bool) -> Element<'static, Input> {
     })
     .into()
 }
-
-fn build_show_visualization_button(enabled: bool) -> Element<'static, Input> {
-    let ui_font = Font::default();
-
-    button(
-        row![
-            text("Show Visualization").size(11).font(ui_font),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-    )
-    .padding([6, 12])
-    .style(move |_theme: &Theme, status| {
-        let bg = if enabled {
-            match status {
-                button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.22),
-                _ => Color::from_rgb(0.14, 0.14, 0.17),
-            }
-        } else {
-            Color::from_rgb(0.10, 0.10, 0.12)
-        };
-
-        let border = if enabled {
-            Color::from_rgb(0.24, 0.24, 0.28)
-        } else {
-            Color::from_rgb(0.16, 0.16, 0.19)
-        };
-
-        let text_color = if enabled {
-            Color::from_rgb(0.82, 0.82, 0.85)
-        } else {
-            Color::from_rgb(0.45, 0.45, 0.50)
-        };
-
-        button::Style {
-            background: Some(bg.into()),
-            border: iced::Border {
-                color: border,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            text_color,
-            ..Default::default()
-        }
-    })
-    .into()
-}
-
 
 fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
     let mut btn = button(
         container(
             text("Run")
-                .size(12)
+                .size(14)
                 .font(Font::default())
         )
         .center_x(Length::Fill)
@@ -166,12 +118,12 @@ fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
         btn = btn.on_press(Input::RunCode(has_testcase));
     }
 
-    btn.padding([8, 24])
+    btn.padding([10, 30])
     .style(move |_theme: &Theme, status| {
         let (base_bg, hover_bg, text_color) = if has_testcase != 0 {
-            (Color::from_rgb(0.2, 0.5, 0.3), Color::from_rgb(0.25, 0.6, 0.35), Color::from_rgb(0.95, 0.95, 0.97))
+            (Color::from_rgb(0.18, 0.48, 0.28), Color::from_rgb(0.22, 0.58, 0.34), Color::from_rgb(0.96, 0.98, 0.96))
         } else {
-            (Color::from_rgb(0.15, 0.15, 0.18), Color::from_rgb(0.15, 0.15, 0.18), Color::from_rgb(0.4, 0.4, 0.45))
+            (Color::from_rgb(0.12, 0.12, 0.15), Color::from_rgb(0.12, 0.12, 0.15), Color::from_rgb(0.38, 0.38, 0.43))
         };
         button::Style {
             background: Some(match status {
@@ -179,9 +131,9 @@ fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
                 _ => base_bg.into(),
             }),
             border: iced::Border {
-                color: if has_testcase != 0 { Color::from_rgb(0.3, 0.6, 0.4) } else { Color::from_rgb(0.2, 0.2, 0.25) },
+                color: if has_testcase != 0 { Color::from_rgb(0.28, 0.58, 0.38) } else { Color::from_rgb(0.18, 0.18, 0.22) },
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 8.0.into(),
             },
             text_color,
             ..Default::default()
@@ -226,165 +178,28 @@ fn build_code_editor<'a>(
 }
 
 
-fn build_output_tab_button(is_active: bool) -> Element<'static, Input> {
+fn build_results_header(show_batch_results: bool) -> Element<'static, Input> {
     let ui_font = Font::default();
 
-    button(
-        text("Output").size(11).font(ui_font)
+    container(
+        row![
+            text(if show_batch_results { "Batch Results" } else { "Results" })
+                .size(12)
+                .font(ui_font)
+                .style(|_theme: &Theme| text::Style {
+                    color: Some(Color::from_rgb(0.9, 0.9, 0.92)),
+                }),
+            column![].width(Length::Fill),
+            text(if show_batch_results { "Inspect generated batch runs" } else { "Latest run output" })
+                .size(10)
+                .font(ui_font)
+                .style(|_theme: &Theme| text::Style {
+                    color: Some(Color::from_rgb(0.5, 0.5, 0.55)),
+                }),
+        ]
+        .align_y(Alignment::Center)
     )
-    .on_press(Input::BottomPanelTabSelected(BottomPanelTab::Output))
-    .padding([6, 12])
-    .style(move |_theme: &Theme, status| {
-        let bg = match status {
-            button::Status::Hovered => Color::from_rgb(0.12, 0.12, 0.15),
-            _ => Color::TRANSPARENT,
-        };
-        button::Style {
-            background: Some(bg.into()),
-            border: iced::Border {
-                color: if is_active {
-                    Color::from_rgb(0.4, 0.4, 0.45)
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: if is_active { 1.0 } else { 0.0 },
-                radius: 4.0.into(),
-            },
-            text_color: if is_active {
-                Color::from_rgb(0.9, 0.9, 0.92)
-            } else {
-                Color::from_rgb(0.5, 0.5, 0.55)
-            },
-            ..Default::default()
-        }
-    })
-    .into()
-}
-
-fn build_multiple_test_cases_tab_button(is_active: bool) -> Element<'static, Input> {
-    let ui_font = Font::default();
-    button(
-        text("Multiple Test Cases").size(11).font(ui_font)
-    )
-    .on_press(Input::BottomPanelTabSelected(BottomPanelTab::MultipleTestCases))
-    .padding([6, 12])
-    .style(move |_theme: &Theme, status| {
-        let bg = match status {
-            button::Status::Hovered => Color::from_rgb(0.12, 0.12, 0.15),
-            _ => Color::TRANSPARENT,
-        };
-        button::Style {
-            background: Some(bg.into()),
-            border: iced::Border {
-                color: if is_active {
-                    Color::from_rgb(0.4, 0.4, 0.45)
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: if is_active { 1.0 } else { 0.0 },
-                radius: 4.0.into(),
-            },
-            text_color: if is_active {
-                Color::from_rgb(0.9, 0.9, 0.92)
-            } else {
-                Color::from_rgb(0.5, 0.5, 0.55)
-            },
-            ..Default::default()
-        }
-    })
-    .into()
-}
-
-
-fn build_test_cases_tab_button(is_active: bool) -> Element<'static, Input> {
-    let ui_font = Font::default();
-
-    button(
-        text("Single Test Case").size(11).font(ui_font)
-    )
-    .on_press(Input::BottomPanelTabSelected(BottomPanelTab::TestCases))
-    .padding([6, 12])
-    .style(move |_theme: &Theme, status| {
-        let bg = match status {
-            button::Status::Hovered => Color::from_rgb(0.12, 0.12, 0.15),
-            _ => Color::TRANSPARENT,
-        };
-        button::Style {
-            background: Some(bg.into()),
-            border: iced::Border {
-                color: if is_active {
-                    Color::from_rgb(0.4, 0.4, 0.45)
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: if is_active { 1.0 } else { 0.0 },
-                radius: 4.0.into(),
-            },
-            text_color: if is_active {
-                Color::from_rgb(0.9, 0.9, 0.92)
-            } else {
-                Color::from_rgb(0.5, 0.5, 0.55)
-            },
-            ..Default::default()
-        }
-    })
-    .into()
-}
-
-fn build_toggle_panel_button(is_visible: bool) -> Element<'static, Input> {
-    let ui_font = Font::default();
-
-    button(
-        text(if is_visible { "▼" } else { "▲" })
-            .size(10)
-            .font(ui_font)
-    )
-    .on_press(Input::ToggleBottomPanel)
-    .padding([4, 8])
-    .style(|_theme: &Theme, status| {
-        let bg = match status {
-            button::Status::Hovered => Color::from_rgb(0.15, 0.15, 0.18),
-            _ => Color::TRANSPARENT,
-        };
-        button::Style {
-            background: Some(bg.into()),
-            border: iced::Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            text_color: Color::from_rgb(0.6, 0.6, 0.65),
-            ..Default::default()
-        }
-    })
-    .into()
-}
-
-fn build_bottom_panel_tab_bar<'a>(
-    active_tab: BottomPanelTab,
-    is_visible: bool,
-    show_viz_button: bool,
-    is_root: bool,
-) -> Element<'a, Input> {
-    let output_tab_active = active_tab == BottomPanelTab::Output;
-    let test_cases_tab_active = active_tab == BottomPanelTab::TestCases;
-    let multiple_test_cases_tab_active = active_tab == BottomPanelTab::MultipleTestCases;
-
-    let mut tab_row = row![build_output_tab_button(output_tab_active)];
-
-    // Only show Test Cases tab for root (nodes use inherited region rectangles)
-    if is_root {
-        tab_row = tab_row.push(build_test_cases_tab_button(test_cases_tab_active));
-        tab_row = tab_row.push(build_multiple_test_cases_tab_button(multiple_test_cases_tab_active));
-    }
-
-    tab_row = tab_row
-        .push(column![].width(Length::Fill))
-        .push(build_toggle_panel_button(is_visible))
-        .push(build_show_visualization_button(show_viz_button))
-        .push(build_save_output_json_button(show_viz_button));
-
-    container(tab_row.spacing(4).align_y(Alignment::Center))
-    .padding([4, 8])
+    .padding([8, 10])
     .width(Length::Fill)
     .style(|_theme: &Theme| {
         container::Style {
@@ -502,7 +317,6 @@ fn build_multiple_test_cases_content<'a>(
     num_test_cases: &'a str,
     input_size: &'a str,
     unique_types: &'a str,
-    display_visual: bool,
 ) -> Element<'a, Input> {
     let ui_font = Font::default();
 
@@ -926,112 +740,63 @@ fn build_multi_run_results_content<'a>(
 }
 
 fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
-    let tab_bar = build_bottom_panel_tab_bar(
-        state.bottom_panel_tab,
-        state.bottom_panel_visible,
-        state.show_visualization_button,
-        state.is_root,
-    );
-
-    if state.bottom_panel_visible {
-        let content: Element<'_, Input> = match state.bottom_panel_tab {
-            BottomPanelTab::Output | BottomPanelTab::Problems => {
-                if !state.multiple_run_results.is_empty() {
-                    build_multi_run_results_content(state.multiple_run_results, state.multiple_results_expanded)
-                } else {
-                    build_output_content(state.code_output_json)
-                }
-            }
-            BottomPanelTab::TestCases => {
-                build_test_cases_content(state.testcase_message, state.testcase, state.input_size_input, state.unique_types_input)
-            }
-            BottomPanelTab::MultipleTestCases => {
-                build_multiple_test_cases_content(state.multiple_testcase_message, state.num_test_cases_input, state.input_size_input, state.unique_types_input, state.display_visual)
-            }
-        };
-
-        container(
-            column![
-                tab_bar,
-                container(content)
-                    .width(Length::Fill)
-                    .height(Length::Fixed(state.bottom_panel_height))
-                    .style(|_theme: &Theme| {
-                        container::Style {
-                            background: Some(Color::from_rgb(0.045, 0.045, 0.055).into()),
-                            border: iced::Border {
-                                color: Color::from_rgb(0.12, 0.12, 0.15),
-                                width: 1.0,
-                                radius: 6.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    }),
-            ]
-            .spacing(0)
-        )
-        .width(Length::Fill)
-        .into()
+    let show_batch_results = !state.multiple_run_results.is_empty();
+    let content: Element<'_, Input> = if show_batch_results {
+        build_multi_run_results_content(state.multiple_run_results, state.multiple_results_expanded)
     } else {
-        container(tab_bar)
-            .width(Length::Fill)
-            .into()
-    }
+        build_output_content(state.code_output_json)
+    };
+
+    container(
+        column![
+            build_results_header(show_batch_results),
+            container(content)
+                .width(Length::Fill)
+                .height(220)
+                .style(|_theme: &Theme| {
+                    container::Style {
+                        background: Some(Color::from_rgb(0.045, 0.045, 0.055).into()),
+                        border: iced::Border {
+                            color: Color::from_rgb(0.12, 0.12, 0.15),
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                }),
+        ]
+        .spacing(6)
+    )
+    .width(Length::Fill)
+    .into()
 }
 
 pub fn build_code_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
     let language_selector = build_language_selector(state.selected_language);
     let has_testcase: i32 = if !state.is_root {
-	1
-    } else { match state.bottom_panel_tab {
-        BottomPanelTab::TestCases => if state.testcase_message.is_some() {1} else {0},
-        BottomPanelTab::MultipleTestCases => if state.multiple_testcase_message.is_some() {2} else {0},
-        _ => 0,
-        }
+        1
+    } else if state.has_single_testcase {
+        1
+    } else if state.has_multiple_testcases {
+        2
+    } else {
+        0
     };
     let run_button = build_run_button(has_testcase);
     let code_editor = build_code_editor(state.code_editor_content, state.selected_language);
     let bottom_panel = build_bottom_panel(state);
-
-    let resize_handle = {
-        use iced::widget::mouse_area;
-        use iced::mouse::Interaction;
-
-        let handle_visual = container(
-            row![
-                column![].width(Length::Fill),
-                container(column![].height(2.0))
-                    .width(40.0)
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(Color::from_rgb(0.25, 0.25, 0.32).into()),
-                        border: iced::Border { radius: 2.0.into(), ..Default::default() },
-                        ..Default::default()
-                    }),
-                column![].width(Length::Fill),
-            ]
-            .align_y(Alignment::Center)
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(8.0))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(Color::from_rgb(0.07, 0.07, 0.09).into()),
-            ..Default::default()
-        });
-
-        mouse_area(handle_visual)
-            .on_press(Input::PanelResizeStart)
-            .interaction(Interaction::ResizingVertically)
-    };
 
     column![
         row![
             language_selector,
             column![].width(Length::Fill),
             run_button,
-        ].spacing(8).align_y(Alignment::Center),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
         column![].height(8),
         code_editor,
-        resize_handle,
+        column![].height(12),
         bottom_panel,
     ]
     .spacing(0)
