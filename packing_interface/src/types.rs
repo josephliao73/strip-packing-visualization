@@ -18,7 +18,6 @@ pub enum RightPanelTab {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BottomPanelTab {
-    Problems,
     Output,
     TestCases,
     MultipleTestCases,
@@ -29,6 +28,12 @@ pub enum CodeLanguage {
     Python,
     Cpp,
     Java,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceTab {
+    CreateSingleTestCase,
+    ImportGenerateTestCases,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -106,6 +111,8 @@ pub enum Input {
     NumTestCasesChanged(String),
     InputSizeChanged(String),
     UniqueTypesChanged(String),
+    SingleInputSizeChanged(String),
+    SingleUniqueTypesChanged(String),
     DisplayVisual(bool),
     ToggleMultipleResultExpanded(usize),
     AreaSelectStart(f32, f32),
@@ -120,6 +127,7 @@ pub enum Input {
     PanelResizeEnd,
     DisplayMultipleResult(usize),
     CreateNewTab,
+    WorkspaceTabSelected(WorkspaceTab),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Eq, Copy)]
@@ -225,6 +233,8 @@ pub struct PackingApp {
     pub num_test_cases_input: String,
     pub input_size_input: String,
     pub unique_types_input: String,
+    pub single_input_size_input: String,
+    pub single_unique_types_input: String,
     pub display_visual: bool,
     pub multiple_test_cases: Vec<JsonInput>,
     pub multiple_testcase_message: Option<String>,
@@ -233,6 +243,7 @@ pub struct PackingApp {
     pub bottom_panel_height: f32,
     pub is_resizing_panel: bool,
     pub panel_drag_last_y: f32,
+    pub workspace_tab: WorkspaceTab,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
