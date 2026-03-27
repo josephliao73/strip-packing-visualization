@@ -1,7 +1,7 @@
 use crate::algorithm_templates::{AlgorithmTemplate, ROOT_ALGORITHM_TEMPLATES};
 use crate::types::{BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult};
 use iced::highlighter::Theme as HighlighterTheme;
-use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_editor, text_input, mouse_area};
+use iced::widget::{button, column, container, pick_list, progress_bar, row, scrollable, text, text_editor, text_input, mouse_area};
 use iced::{mouse, Alignment, Color, Element, Font, Length, Theme};
 
 pub struct EditorState<'a> {
@@ -25,6 +25,9 @@ pub struct EditorState<'a> {
     pub multiple_results_expanded: &'a [bool],
     pub bottom_panel_height: f32,
     pub show_algorithm_templates: bool,
+    pub batch_run_in_progress: bool,
+    pub batch_run_completed: usize,
+    pub batch_run_total: usize,
 }
 
 
@@ -683,6 +686,9 @@ fn build_test_cases_content<'a>(
 fn build_multi_run_results_content<'a>(
     results: &'a [MultipleRunResult],
     expanded: &'a [bool],
+    batch_run_in_progress: bool,
+    batch_run_completed: usize,
+    batch_run_total: usize,
 ) -> Element<'a, Input> {
     let ui_font = Font::default();
 
@@ -696,21 +702,56 @@ fn build_multi_run_results_content<'a>(
         )
     };
 
+    let progress = if batch_run_total == 0 {
+        0.0
+    } else {
+        batch_run_completed as f32 / batch_run_total as f32
+    };
+
+    let progress_label = if batch_run_total == 0 {
+        "No batch queued".to_string()
+    } else if batch_run_in_progress {
+        format!("Running {}/{}", batch_run_completed, batch_run_total)
+    } else {
+        format!("Completed {}/{}", batch_run_completed, batch_run_total)
+    };
+
     let header = container(
-        row![
-            text(format!(
-                "Average height: {}   ({}/{} succeeded)",
-                avg_str,
-                valid_heights.len(),
-                results.len()
-            ))
-            .size(11)
-            .font(ui_font)
-            .style(|_theme: &Theme| text::Style {
-                color: Some(Color::from_rgb(0.75, 0.85, 0.75)),
-            }),
+        column![
+            row![
+                text(format!(
+                    "Average height: {}   ({}/{} succeeded)",
+                    avg_str,
+                    valid_heights.len(),
+                    results.len()
+                ))
+                .size(11)
+                .font(ui_font)
+                .style(|_theme: &Theme| text::Style {
+                    color: Some(Color::from_rgb(0.75, 0.85, 0.75)),
+                }),
+                column![].width(Length::Fill),
+                text(progress_label)
+                    .size(10)
+                    .font(ui_font)
+                    .style(|_theme: &Theme| text::Style {
+                        color: Some(Color::from_rgb(0.58, 0.68, 0.84)),
+                    }),
+            ]
+            .align_y(Alignment::Center),
+            progress_bar(0.0..=1.0, progress)
+                .height(8)
+                .style(|_theme: &Theme| iced::widget::progress_bar::Style {
+                    background: Color::from_rgb(0.10, 0.10, 0.13).into(),
+                    bar: Color::from_rgb(0.28, 0.48, 0.78).into(),
+                    border: iced::Border {
+                        color: Color::from_rgb(0.16, 0.16, 0.20),
+                        width: 1.0,
+                        radius: 999.0.into(),
+                    },
+                }),
         ]
-        .align_y(Alignment::Center),
+        .spacing(8),
     )
     .padding([8, 10])
     .width(Length::Fill)
@@ -834,7 +875,13 @@ fn build_multi_run_results_content<'a>(
 fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
     let show_batch_results = !state.multiple_run_results.is_empty();
     let content: Element<'_, Input> = if show_batch_results {
-        build_multi_run_results_content(state.multiple_run_results, state.multiple_results_expanded)
+        build_multi_run_results_content(
+            state.multiple_run_results,
+            state.multiple_results_expanded,
+            state.batch_run_in_progress,
+            state.batch_run_completed,
+            state.batch_run_total,
+        )
     } else {
         build_output_content(state.code_output_json)
     };

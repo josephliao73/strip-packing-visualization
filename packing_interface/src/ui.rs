@@ -6,7 +6,7 @@ use iced::widget::{button, checkbox, column, container, row, text, text_input, t
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
 use iced::widget::canvas::Canvas;
-use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement, WorkspaceTab};
+use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, RootTabState, SelectionRegion, Settings, NonEmptySpace, Placement, WorkspaceTab};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
 
@@ -29,6 +29,7 @@ impl Default for PackingApp {
                 obstacle_spaces: Vec::new(),
                 selection_regions: Vec::new(),
                 code: algorithm_templates::default_root_code(CodeLanguage::Python).to_string(),
+                language: CodeLanguage::Python,
                 algorithm_template: AlgorithmTemplate::Blank,
                 last_right_panel_tab: RightPanelTab::Visualization,
                 algorithm_output: None,
@@ -38,6 +39,7 @@ impl Default for PackingApp {
                 hit_grid: None,
                 visible_rects: 0,
                 animating: false,
+                root_state: Some(RootTabState::default()),
             }],
             active_algo_tab_id: 0,
             next_algo_tab_id: 1,
@@ -91,6 +93,12 @@ impl Default for PackingApp {
             multiple_testcase_message: None,
             multiple_run_results: Vec::new(),
             multiple_results_expanded: Vec::new(),
+            batch_run_in_progress: false,
+            batch_run_total: 0,
+            batch_run_completed: 0,
+            batch_run_failures: 0,
+            batch_run_code: None,
+            batch_run_language: None,
             bottom_panel_height: 150.0,
             is_resizing_panel: false,
             panel_drag_last_y: 0.0,
@@ -224,7 +232,7 @@ impl PackingApp {
                 self.is_resizing_panel = false;
             }
             Input::CreateNewTab => {
-                self.create_new_tab(None);
+                self.create_blank_root_tab();
             }
             Input::AlgorithmTemplateSelected(template) => {
                 self.template_menu_selection = template;
@@ -500,6 +508,7 @@ impl PackingApp {
                 self.snap_preview = None;
             }
             Input::Tick => {
+                self.process_batch_run_step();
                 if let Some(tab) = self.active_algo_tab_mut() {
                     if let Some(output) = &tab.algorithm_output {
                         let total = output.placements.len();
@@ -621,11 +630,14 @@ impl PackingApp {
                 self.code_editor_content = text_editor::Content::with_text(default_code);
                 if let Some(tab) = self.active_algo_tab_mut() {
                     tab.code = default_code.to_string();
+                    tab.language = lang;
                 }
             }
             Input::RunCode(which_tab) => {
                 if which_tab == 1 {
-                    let is_root = self.active_algo_tab_id == 0;
+                    let is_root = self.active_algo_tab()
+                        .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
+                        .unwrap_or(true);
                     if is_root {
                         if let Some(testcase) = self.current_testcase.clone() {
                             self.run_with_testcase(&testcase);
@@ -795,7 +807,7 @@ impl PackingApp {
 			}
 		    }
                 } else {
-                    self.batch_run();
+                    self.start_batch_run();
                 }
             }
             Input::SaveOutputToFile => {
@@ -870,7 +882,7 @@ impl PackingApp {
                 let msg = format!("Generated: {} test cases", self.multiple_test_cases.len());
                 self.multiple_testcase_message = Some(msg);
                 if self.multiple_testcase_message.is_some() {
-                    self.batch_run();
+                    self.start_batch_run();
                 }
             }
             Input::ToggleAreaSelectEnabled(enabled) => {
@@ -1090,6 +1102,7 @@ impl PackingApp {
                             obstacle_spaces: Vec::new(),
                             selection_regions: vec![inherited_region],
                             code: new_code,
+                            language: self.selected_language,
                             algorithm_template: AlgorithmTemplate::Blank,
                             last_right_panel_tab: RightPanelTab::Visualization,
                             algorithm_output: parent_output.clone(),
@@ -1099,6 +1112,7 @@ impl PackingApp {
                             hit_grid: None,
                             visible_rects: parent_visible,
                             animating: parent_animating,
+                            root_state: None,
                         });
 
                     self.algo_tabs[tab_idx].selection_regions.remove(region_idx);
@@ -1118,7 +1132,7 @@ impl PackingApp {
 
         let mut subscriptions = vec![];
 
-        if self.active_algo_tab().map(|t| t.animating).unwrap_or(false) {
+        if self.active_algo_tab().map(|t| t.animating).unwrap_or(false) || self.batch_run_in_progress {
             subscriptions.push(
                 time::every(Duration::from_millis(self.animation_speed as u64)).map(|_| Input::Tick)
             );
@@ -1240,24 +1254,81 @@ if !self.settings.snap_to_rectangles_enabled {
 }
 
 
-fn batch_run(&mut self) {
-    let test_cases = self.multiple_test_cases.clone();
-    let user_code = self.code_editor_content.text();
-    let language = self.selected_language;
-    let results: Vec<MultipleRunResult> = test_cases.iter().map(|testcase| {
-    let run_result = run_code_with_testcase(language, &user_code, testcase);
-    let (height, output) = match run_result {
-        RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
-        RunResult::Error { .. } => (None, None),
-    };
-    MultipleRunResult { testcase: testcase.clone(), height, output, tab_id: None }
-        }).collect();
-    let n = results.len();
-    self.multiple_results_expanded = vec![false; n];
-    self.multiple_run_results = results;
+fn start_batch_run(&mut self) {
+    let total = self.multiple_test_cases.len();
+    if total == 0 {
+        self.error_message = Some("Generate or import batch test cases first.".to_string());
+        return;
+    }
+
+    self.batch_run_in_progress = true;
+    self.batch_run_total = total;
+    self.batch_run_completed = 0;
+    self.batch_run_failures = 0;
+    self.batch_run_code = Some(self.code_editor_content.text());
+    self.batch_run_language = Some(self.selected_language);
+    self.multiple_run_results.clear();
+    self.multiple_results_expanded.clear();
     self.active_tab = RightPanelTab::CodeEditor;
     self.bottom_panel_tab = BottomPanelTab::Output;
-    self.error_message = Some(format!("✓ Batch run completed for {} test cases", n));
+    self.error_message = Some(format!("Running batch: 0/{}", total));
+}
+
+fn process_batch_run_step(&mut self) {
+    const BATCH_CASES_PER_TICK: usize = 1;
+
+    if !self.batch_run_in_progress {
+        return;
+    }
+
+    let Some(language) = self.batch_run_language else {
+        self.batch_run_in_progress = false;
+        return;
+    };
+    let Some(code) = self.batch_run_code.clone() else {
+        self.batch_run_in_progress = false;
+        return;
+    };
+
+    let end = (self.batch_run_completed + BATCH_CASES_PER_TICK).min(self.batch_run_total);
+    for index in self.batch_run_completed..end {
+        let testcase = self.multiple_test_cases[index].clone();
+        let run_result = run_code_with_testcase(language, &code, &testcase);
+        let (height, output) = match run_result {
+            RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
+            RunResult::Error { .. } => {
+                self.batch_run_failures += 1;
+                (None, None)
+            }
+        };
+        self.multiple_run_results.push(MultipleRunResult {
+            testcase,
+            height,
+            output,
+            tab_id: None,
+        });
+        self.multiple_results_expanded.push(false);
+    }
+
+    self.batch_run_completed = end;
+
+    if self.batch_run_completed >= self.batch_run_total {
+        self.batch_run_in_progress = false;
+        self.batch_run_code = None;
+        self.batch_run_language = None;
+        let succeeded = self.batch_run_total.saturating_sub(self.batch_run_failures);
+        self.error_message = Some(format!(
+            "✓ Batch run completed for {} test cases ({} succeeded)",
+            self.batch_run_total,
+            succeeded
+        ));
+    } else {
+        self.error_message = Some(format!(
+            "Running batch: {}/{}",
+            self.batch_run_completed,
+            self.batch_run_total
+        ));
+    }
 }
 
 fn snap_to_rectangles(
@@ -1782,6 +1853,7 @@ fn snap_to_rectangles(
         let new_id = self.next_algo_tab_id;
         self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
         let template = self.active_algo_tab().map(|tab| tab.algorithm_template).unwrap_or(AlgorithmTemplate::Blank);
+        let root_state = self.current_root_state_snapshot();
         self.algo_tabs.push(AlgoTab {
             id: new_id,
             name,
@@ -1790,6 +1862,7 @@ fn snap_to_rectangles(
             obstacle_spaces: Vec::new(),
             selection_regions: Vec::new(),
             code: self.code_editor_content.text(),
+            language: self.selected_language,
             algorithm_template: template,
             last_right_panel_tab: RightPanelTab::Visualization,
             algorithm_output: output.cloned(),
@@ -1799,9 +1872,41 @@ fn snap_to_rectangles(
             hit_grid: None,
             visible_rects: output.map(|o| o.placements.len()).unwrap_or(0),
             animating: false,
+            root_state,
         });
         self.set_active_algo_tab(new_id);
         new_id
+    }
+
+    fn create_blank_root_tab(&mut self) {
+        let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Base Layout")).count();
+        let name = format!("Base Layout {}", root_count + 1);
+        let language = self.selected_language;
+        let new_id = self.next_algo_tab_id;
+        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+
+        self.algo_tabs.push(AlgoTab {
+            id: new_id,
+            name,
+            selected_indices: Vec::new(),
+            repacked_indices: Vec::new(),
+            obstacle_spaces: Vec::new(),
+            selection_regions: Vec::new(),
+            code: algorithm_templates::default_root_code(language).to_string(),
+            language,
+            algorithm_template: AlgorithmTemplate::Blank,
+            last_right_panel_tab: RightPanelTab::CodeEditor,
+            algorithm_output: None,
+            parent_output: None,
+            repack_output: None,
+            output_revision: 0,
+            hit_grid: None,
+            visible_rects: 0,
+            animating: false,
+            root_state: Some(RootTabState::default()),
+        });
+        self.set_active_algo_tab(new_id);
+        self.active_tab = RightPanelTab::CodeEditor;
     }
 
     fn create_template_tab(&mut self) {
@@ -1819,6 +1924,7 @@ fn snap_to_rectangles(
             obstacle_spaces: Vec::new(),
             selection_regions: Vec::new(),
             code,
+            language: self.selected_language,
             algorithm_template: template,
             last_right_panel_tab: RightPanelTab::CodeEditor,
             algorithm_output: None,
@@ -1828,6 +1934,7 @@ fn snap_to_rectangles(
             hit_grid: None,
             visible_rects: 0,
             animating: false,
+            root_state: Some(RootTabState::default()),
         });
         self.set_active_algo_tab(new_id);
         self.active_tab = RightPanelTab::CodeEditor;
@@ -1840,33 +1947,113 @@ fn snap_to_rectangles(
     }
 
     fn set_active_algo_tab(&mut self, tab_id: u64) {
-        // Save current tab's code before switching
         let current_code = self.code_editor_content.text();
+        let current_language = self.selected_language;
+        let current_root_state = self.current_root_state_snapshot();
         if let Some(current_tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
             current_tab.code = current_code;
+            current_tab.language = current_language;
             current_tab.last_right_panel_tab = self.active_tab;
+            if current_tab.root_state.is_some() {
+                current_tab.root_state = current_root_state;
+            }
         }
 
         self.active_algo_tab_id = tab_id;
-
-        // Reset area select state for new tab (each tab can create regions independently)
         self.new_area_select = true;
 
-        // Load new tab's code
         if let Some(new_tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
-            self.code_editor_content = text_editor::Content::with_text(&new_tab.code);
-            self.template_menu_selection = new_tab.algorithm_template;
+            let code = new_tab.code.clone();
+            let language = new_tab.language;
+            let template = new_tab.algorithm_template;
+            let last_right_panel_tab = new_tab.last_right_panel_tab;
+            let selected_indices = new_tab.selected_indices.clone();
+            let has_output = new_tab.algorithm_output.is_some();
+            let root_state = new_tab.root_state.clone();
+
+            self.code_editor_content = text_editor::Content::with_text(&code);
+            self.selected_language = language;
+            self.template_menu_selection = template;
+            self.active_tab = last_right_panel_tab;
             self.selected_rects.clear();
-            for idx in &new_tab.selected_indices {
-                self.selected_rects.insert(*idx);
+            for idx in selected_indices {
+                self.selected_rects.insert(idx);
             }
-            self.active_tab = new_tab.last_right_panel_tab;
-            if new_tab.algorithm_output.is_some() {
+            if let Some(root_state) = root_state {
+                self.load_root_tab_state(root_state);
+            } else {
+                self.load_root_tab_state(RootTabState::default());
+            }
+            if has_output {
                 self.rebuild_hit_grid();
             }
         } else {
             self.selected_rects.clear();
         }
+    }
+
+    fn current_root_state_snapshot(&self) -> Option<RootTabState> {
+        let is_root = self.active_algo_tab()
+            .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
+            .unwrap_or(true);
+        if !is_root {
+            return None;
+        }
+
+        Some(RootTabState {
+            w_input: self.w_input.clone(),
+            n_input: self.n_input.clone(),
+            k_input: self.k_input.clone(),
+            autofile: self.autofile,
+            rectangle_text: self.rectangle_data.text(),
+            current_testcase: self.current_testcase.clone(),
+            testcase_message: self.testcase_message.clone(),
+            num_test_cases_input: self.num_test_cases_input.clone(),
+            input_size_input: self.input_size_input.clone(),
+            unique_types_input: self.unique_types_input.clone(),
+            single_input_size_input: self.single_input_size_input.clone(),
+            single_unique_types_input: self.single_unique_types_input.clone(),
+            single_bin_width_input: self.single_bin_width_input.clone(),
+            batch_bin_width_input: self.batch_bin_width_input.clone(),
+            multiple_test_cases: self.multiple_test_cases.clone(),
+            multiple_testcase_message: self.multiple_testcase_message.clone(),
+            multiple_run_results: self.multiple_run_results.clone(),
+            multiple_results_expanded: self.multiple_results_expanded.clone(),
+            batch_run_in_progress: self.batch_run_in_progress,
+            batch_run_total: self.batch_run_total,
+            batch_run_completed: self.batch_run_completed,
+            batch_run_failures: self.batch_run_failures,
+            batch_run_code: self.batch_run_code.clone(),
+            batch_run_language: self.batch_run_language,
+        })
+    }
+
+    fn load_root_tab_state(&mut self, state: RootTabState) {
+        self.w_input = state.w_input;
+        self.n_input = state.n_input;
+        self.k_input = state.k_input;
+        self.autofile = state.autofile;
+        self.rectangle_data = text_editor::Content::with_text(&state.rectangle_text);
+        self.update_rectangle_line_info();
+        self.current_testcase = state.current_testcase;
+        self.testcase_message = state.testcase_message;
+        self.num_test_cases_input = state.num_test_cases_input;
+        self.input_size_input = state.input_size_input;
+        self.unique_types_input = state.unique_types_input;
+        self.single_input_size_input = state.single_input_size_input;
+        self.single_unique_types_input = state.single_unique_types_input;
+        self.single_bin_width_input = state.single_bin_width_input;
+        self.batch_bin_width_input = state.batch_bin_width_input;
+        self.multiple_test_cases = state.multiple_test_cases;
+        self.multiple_testcase_message = state.multiple_testcase_message;
+        self.multiple_run_results = state.multiple_run_results;
+        self.multiple_results_expanded = state.multiple_results_expanded;
+        self.batch_run_in_progress = state.batch_run_in_progress;
+        self.batch_run_total = state.batch_run_total;
+        self.batch_run_completed = state.batch_run_completed;
+        self.batch_run_failures = state.batch_run_failures;
+        self.batch_run_code = state.batch_run_code;
+        self.batch_run_language = state.batch_run_language;
     }
 
     fn update_active_tab_selection_from_current(&mut self) {
@@ -3074,9 +3261,10 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                     check_less_than = false;
                 }
             }
-            let batch_enabled = batch_count > 0 && check_less_than;
+            let batch_enabled = !self.batch_run_in_progress && batch_count > 0 && check_less_than;
             let batch_button = {
-                let mut b = button(text("Run Batch").size(13).font(ui_font))
+                let button_label = if self.batch_run_in_progress { "Running..." } else { "Generate and Run Batch" };
+                let mut b = button(text(button_label).size(13).font(ui_font))
                     .padding([9, 18])
                     .width(Length::Shrink)
                     .style(move |_theme: &Theme, status| button::Style {
@@ -3098,19 +3286,20 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                     });
                 if batch_enabled {
                     b = b.on_press(Input::GenerateMultipleTestCases(batch_count));
-                    if !self.multiple_test_cases.is_empty() {
-                        b = b.on_press(Input::RunCode(2));
-                    }
                 }
                 b
             };
 
 
             let batch_status: Element<'_, Input> = {
-                let (icon, msg, color) = if self.multiple_test_cases.is_empty() {
+                let (icon, msg, color) = if self.batch_run_in_progress {
+                    ("●", format!("Running {}/{} cases", self.batch_run_completed, self.batch_run_total), Color::from_rgb(0.55, 0.75, 0.60))
+                } else if self.batch_run_total > 0 {
+                    ("●", format!("Completed {} cases", self.batch_run_total), Color::from_rgb(0.55, 0.75, 0.60))
+                } else if self.multiple_test_cases.is_empty() {
                     ("○", "No batch generated".to_string(), Color::from_rgb(0.42, 0.44, 0.52))
                 } else {
-                    ("●", format!("{} cases running", self.multiple_test_cases.len()), Color::from_rgb(0.55, 0.75, 0.60))
+                    ("●", format!("{} cases ready", self.multiple_test_cases.len()), Color::from_rgb(0.55, 0.75, 0.60))
                 };
                 row![
                     text(icon).size(10).font(ui_font).style(move |_: &Theme| text::Style { color: Some(color) }),
@@ -3514,22 +3703,25 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             code_errors: &self.code_errors,
             code_output_json: self.code_output_json.as_deref(),
             testcase_message: self.testcase_message.as_deref(),
+            multiple_testcase_message: self.multiple_testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
             is_root: self.active_algo_tab()
                 .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
                 .unwrap_or(true),
+            has_single_testcase: self.current_testcase.is_some(),
+            has_multiple_testcases: !self.multiple_test_cases.is_empty(),
             num_test_cases_input: &self.num_test_cases_input,
             input_size_input: &self.input_size_input,
             unique_types_input: &self.unique_types_input,
-            multiple_testcase_message: self.multiple_testcase_message.as_deref(),
-            has_single_testcase: self.current_testcase.is_some(),
-            has_multiple_testcases: !self.multiple_test_cases.is_empty(),
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
             show_algorithm_templates: self.selected_language == CodeLanguage::Python && self.active_algo_tab()
                 .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
                 .unwrap_or(true),
+            batch_run_in_progress: self.batch_run_in_progress,
+            batch_run_completed: self.batch_run_completed,
+            batch_run_total: self.batch_run_total,
         };
         let code_panel_content = {
             use iced::widget::mouse_area;

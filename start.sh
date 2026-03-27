@@ -27,7 +27,6 @@ require_cmd() {
 
 activate_venv_if_present() {
   if [ -f "$VENV_DIR/bin/activate" ]; then
-    # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
   fi
 }

@@ -167,6 +167,65 @@ pub struct SelectionRegion {
 }
 
 #[derive(Debug, Clone)]
+pub struct RootTabState {
+    pub w_input: String,
+    pub n_input: String,
+    pub k_input: String,
+    pub autofile: bool,
+    pub rectangle_text: String,
+    pub current_testcase: Option<JsonInput>,
+    pub testcase_message: Option<String>,
+    pub num_test_cases_input: String,
+    pub input_size_input: String,
+    pub unique_types_input: String,
+    pub single_input_size_input: String,
+    pub single_unique_types_input: String,
+    pub single_bin_width_input: String,
+    pub batch_bin_width_input: String,
+    pub multiple_test_cases: Vec<JsonInput>,
+    pub multiple_testcase_message: Option<String>,
+    pub multiple_run_results: Vec<MultipleRunResult>,
+    pub multiple_results_expanded: Vec<bool>,
+    pub batch_run_in_progress: bool,
+    pub batch_run_total: usize,
+    pub batch_run_completed: usize,
+    pub batch_run_failures: usize,
+    pub batch_run_code: Option<String>,
+    pub batch_run_language: Option<CodeLanguage>,
+}
+
+impl Default for RootTabState {
+    fn default() -> Self {
+        Self {
+            w_input: String::new(),
+            n_input: String::new(),
+            k_input: String::new(),
+            autofile: false,
+            rectangle_text: String::new(),
+            current_testcase: None,
+            testcase_message: None,
+            num_test_cases_input: String::new(),
+            input_size_input: String::new(),
+            unique_types_input: String::new(),
+            single_input_size_input: String::new(),
+            single_unique_types_input: String::new(),
+            single_bin_width_input: String::new(),
+            batch_bin_width_input: String::new(),
+            multiple_test_cases: Vec::new(),
+            multiple_testcase_message: None,
+            multiple_run_results: Vec::new(),
+            multiple_results_expanded: Vec::new(),
+            batch_run_in_progress: false,
+            batch_run_total: 0,
+            batch_run_completed: 0,
+            batch_run_failures: 0,
+            batch_run_code: None,
+            batch_run_language: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct AlgoTab {
     pub id: u64,
     pub name: String,
@@ -175,6 +234,7 @@ pub struct AlgoTab {
     pub obstacle_spaces: Vec<NonEmptySpace>,
     pub selection_regions: Vec<SelectionRegion>,
     pub code: String,
+    pub language: CodeLanguage,
     pub algorithm_template: AlgorithmTemplate,
     pub last_right_panel_tab: RightPanelTab,
     pub algorithm_output: Option<AlgorithmOutput>,
@@ -184,6 +244,7 @@ pub struct AlgoTab {
     pub hit_grid: Option<HitGrid>,
     pub visible_rects: usize,
     pub animating: bool,
+    pub root_state: Option<RootTabState>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +315,12 @@ pub struct PackingApp {
     pub multiple_testcase_message: Option<String>,
     pub multiple_run_results: Vec<MultipleRunResult>,
     pub multiple_results_expanded: Vec<bool>,
+    pub batch_run_in_progress: bool,
+    pub batch_run_total: usize,
+    pub batch_run_completed: usize,
+    pub batch_run_failures: usize,
+    pub batch_run_code: Option<String>,
+    pub batch_run_language: Option<CodeLanguage>,
     pub bottom_panel_height: f32,
     pub is_resizing_panel: bool,
     pub panel_drag_last_y: f32,
