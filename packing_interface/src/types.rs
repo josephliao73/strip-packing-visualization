@@ -1,7 +1,7 @@
-use crate::algorithm_templates::AlgorithmTemplate;
+use crate::algorithm_templates::AlgorithmTemplateEntry;
 use serde::{Serialize, Deserialize};
 use iced::widget::{text_editor};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use ordered_float::OrderedFloat;
 
 #[derive(Debug, Clone, Copy)]
@@ -105,9 +105,12 @@ pub enum Input {
     RemoveAlgoTab(u64),
     CodeEditorAction(text_editor::Action),
     LanguageSelected(CodeLanguage),
-    AlgorithmTemplateSelected(AlgorithmTemplate),
-    ApplyAlgorithmTemplate,
-    CreateTemplateTab,
+    AlgorithmTemplateSelected(AlgorithmTemplateEntry),
+    TemplateNameChanged(String),
+    TemplateDescriptionChanged(String),
+    ConfirmCreateTemplate,
+    CancelCreateTemplate,
+    TemplateReadOnlyHover(bool),
     RunCode(i32),
     SaveOutputToFile,
     InsertTab,
@@ -235,7 +238,13 @@ pub struct AlgoTab {
     pub selection_regions: Vec<SelectionRegion>,
     pub code: String,
     pub language: CodeLanguage,
-    pub algorithm_template: AlgorithmTemplate,
+    pub algorithm_template: Option<AlgorithmTemplateEntry>,
+    pub python_code: String,
+    pub cpp_code: String,
+    pub python_template: Option<AlgorithmTemplateEntry>,
+    pub cpp_template: Option<AlgorithmTemplateEntry>,
+    pub python_drafts: HashMap<String, String>,
+    pub cpp_drafts: HashMap<String, String>,
     pub last_right_panel_tab: RightPanelTab,
     pub algorithm_output: Option<AlgorithmOutput>,
     pub parent_output: Option<AlgorithmOutput>,
@@ -255,7 +264,62 @@ pub struct HitGrid {
     pub cells: Vec<Vec<usize>>,
 }
 
+impl AlgoTab {
+    pub fn template_for_language(&self, language: CodeLanguage) -> Option<AlgorithmTemplateEntry> {
+        match language {
+            CodeLanguage::Python => self.python_template.clone(),
+            CodeLanguage::Cpp => self.cpp_template.clone(),
+            CodeLanguage::Java => None,
+        }
+    }
+
+    pub fn set_template_for_language(
+        &mut self,
+        language: CodeLanguage,
+        template: Option<AlgorithmTemplateEntry>,
+    ) {
+        match language {
+            CodeLanguage::Python => self.python_template = template,
+            CodeLanguage::Cpp => self.cpp_template = template,
+            CodeLanguage::Java => {}
+        }
+    }
+
+    pub fn code_for_language(&self, language: CodeLanguage) -> String {
+        match language {
+            CodeLanguage::Python => self.python_code.clone(),
+            CodeLanguage::Cpp => self.cpp_code.clone(),
+            CodeLanguage::Java => self.code.clone(),
+        }
+    }
+
+    pub fn set_code_for_language(&mut self, language: CodeLanguage, code: String) {
+        match language {
+            CodeLanguage::Python => self.python_code = code,
+            CodeLanguage::Cpp => self.cpp_code = code,
+            CodeLanguage::Java => self.code = code,
+        }
+    }
+
+    pub fn drafts_for_language(&self, language: CodeLanguage) -> &HashMap<String, String> {
+        match language {
+            CodeLanguage::Python => &self.python_drafts,
+            CodeLanguage::Cpp => &self.cpp_drafts,
+            CodeLanguage::Java => &self.python_drafts,
+        }
+    }
+
+    pub fn drafts_for_language_mut(&mut self, language: CodeLanguage) -> &mut HashMap<String, String> {
+        match language {
+            CodeLanguage::Python => &mut self.python_drafts,
+            CodeLanguage::Cpp => &mut self.cpp_drafts,
+            CodeLanguage::Java => &mut self.python_drafts,
+        }
+    }
+}
+
 pub struct PackingApp {
+    pub lang_map: HashMap<String, bool>,
     pub w_input: String,
     pub n_input: String,
     pub k_input: String,
@@ -285,7 +349,16 @@ pub struct PackingApp {
     pub testcase_message: Option<String>,
     pub code_editor_content: text_editor::Content,
     pub selected_language: CodeLanguage,
-    pub template_menu_selection: AlgorithmTemplate,
+    pub python_template_menu_selection: Option<AlgorithmTemplateEntry>,
+    pub cpp_template_menu_selection: Option<AlgorithmTemplateEntry>,
+    pub available_templates: Vec<AlgorithmTemplateEntry>,
+    pub python_template_options: Vec<AlgorithmTemplateEntry>,
+    pub cpp_template_options: Vec<AlgorithmTemplateEntry>,
+    pub create_template_modal_open: bool,
+    pub create_template_name_input: String,
+    pub create_template_description_input: String,
+    pub create_template_language: Option<CodeLanguage>,
+    pub template_read_only_hovered: bool,
     // Bottom panel state
     pub bottom_panel_visible: bool,
     pub bottom_panel_tab: BottomPanelTab,

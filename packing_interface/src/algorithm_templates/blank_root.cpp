@@ -12,11 +12,6 @@ public:
         auto items = expand_items(rectangles);
 
         std::vector<std::tuple<double, double, int, int>> placements;
-        double y = 0.0;
-        for (const auto& item : items) {
-            placements.push_back({0.0, y, item.width, item.height});
-            y += item.height;
-        }
         return placements;
     }
 };

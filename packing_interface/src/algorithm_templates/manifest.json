@@ -1,0 +1,56 @@
+[
+  {
+    "id": "blank",
+    "name": "Blank",
+    "description": "Minimal starter template using the helper library.",
+    "python_path": "blank_root.py",
+    "cpp_path": "blank_root.cpp",
+    "builtin": true,
+    "editable": false
+  },
+  {
+    "id": "nfdh",
+    "name": "NFDH",
+    "description": "Next-Fit Decreasing Height strip packing.",
+    "python_path": "nfdh.py",
+    "cpp_path": "nfdh.cpp",
+    "builtin": true,
+    "editable": false
+  },
+  {
+    "id": "ffdh",
+    "name": "FFDH",
+    "description": "First-Fit Decreasing Height strip packing.",
+    "python_path": "ffdh.py",
+    "cpp_path": "ffdh.cpp",
+    "builtin": true,
+    "editable": false
+  },
+  {
+    "id": "fspp",
+    "name": "FSPP",
+    "description": "Fractional strip-packing template.",
+    "python_path": "fspp.py",
+    "cpp_path": null,
+    "builtin": true,
+    "editable": false
+  },
+  {
+    "id": "three_fspp",
+    "name": "3FSPP",
+    "description": "Three-strip fractional strip-packing template.",
+    "python_path": "three_fspp.py",
+    "cpp_path": null,
+    "builtin": true,
+    "editable": false
+  },
+  {
+    "id": "custom_python_custom_python_1",
+    "name": "Custom Python",
+    "description": "Editable custom Python template.",
+    "python_path": "custom_python_custom_python_1.py",
+    "cpp_path": null,
+    "builtin": false,
+    "editable": true
+  }
+]

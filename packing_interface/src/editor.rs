@@ -1,13 +1,18 @@
-use crate::algorithm_templates::{AlgorithmTemplate, ROOT_ALGORITHM_TEMPLATES};
+use crate::algorithm_templates::AlgorithmTemplateEntry;
 use crate::types::{BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult};
 use iced::highlighter::Theme as HighlighterTheme;
-use iced::widget::{button, column, container, pick_list, progress_bar, row, scrollable, text, text_editor, text_input, mouse_area};
+use iced::widget::{button, column, container, mouse_area, pick_list, progress_bar, row, scrollable, text, text_editor, text_input};
 use iced::{mouse, Alignment, Color, Element, Font, Length, Theme};
 
 pub struct EditorState<'a> {
     pub code_editor_content: &'a text_editor::Content,
     pub selected_language: CodeLanguage,
-    pub selected_algorithm_template: AlgorithmTemplate,
+    pub selected_algorithm_template: Option<AlgorithmTemplateEntry>,
+    pub available_templates: &'a [AlgorithmTemplateEntry],
+    pub selected_algorithm_description: Option<String>,
+    pub selected_algorithm_is_read_only: bool,
+    pub selected_algorithm_is_builtin: bool,
+    pub template_read_only_hovered: bool,
     pub bottom_panel_visible: bool,
     pub bottom_panel_tab: BottomPanelTab,
     pub code_errors: &'a [String],
@@ -67,12 +72,11 @@ fn build_language_selector(language: CodeLanguage) -> Element<'static, Input> {
     .into()
 }
 
-fn build_algorithm_template_selector(template: AlgorithmTemplate) -> Element<'static, Input> {
-    pick_list(
-        &ROOT_ALGORITHM_TEMPLATES[..],
-        Some(template),
-        Input::AlgorithmTemplateSelected,
-    )
+fn build_algorithm_template_selector<'a>(
+    templates: &'a [AlgorithmTemplateEntry],
+    template: Option<AlgorithmTemplateEntry>,
+) -> Element<'a, Input> {
+    pick_list(templates, template, Input::AlgorithmTemplateSelected)
     .text_size(13)
     .padding([8, 14])
     .style(|_theme: &Theme, status| pick_list::Style {
@@ -101,29 +105,6 @@ fn build_algorithm_template_selector(template: AlgorithmTemplate) -> Element<'st
         selected_background: Color::from_rgb(0.15, 0.22, 0.38).into(),
     })
     .into()
-}
-
-fn build_template_button(label: &'static str, input: Input) -> Element<'static, Input> {
-    button(text(label).size(11).font(Font::default()))
-        .on_press(input)
-        .padding([8, 12])
-        .style(|_theme: &Theme, status| {
-            let background = match status {
-                button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.22),
-                _ => Color::from_rgb(0.12, 0.12, 0.15),
-            };
-            button::Style {
-                background: Some(background.into()),
-                border: iced::Border {
-                    color: Color::from_rgb(0.22, 0.22, 0.28),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                text_color: Color::from_rgb(0.82, 0.84, 0.92),
-                ..Default::default()
-            }
-        })
-        .into()
 }
 
 fn build_save_output_json_button(enabled: bool) -> Element<'static, Input> {
@@ -236,7 +217,7 @@ fn build_code_editor<'a>(
     container(code_editor)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
+        .style(move |_theme: &Theme| container::Style {
             background: Some(Color::from_rgb(0.05, 0.05, 0.07).into()),
             border: iced::Border {
                 color: Color::from_rgb(0.16, 0.16, 0.2),
@@ -919,7 +900,7 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
     .into()
 }
 
-pub fn build_code_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
+pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
     let language_selector = build_language_selector(state.selected_language);
     let has_testcase: i32 = if !state.is_root {
         1
@@ -931,8 +912,11 @@ pub fn build_code_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
         0
     };
     let run_button = build_run_button(has_testcase);
-    let code_editor = build_code_editor(state.code_editor_content, state.selected_language);
-    let bottom_panel = build_bottom_panel(state);
+    let code_editor = build_code_editor(
+        state.code_editor_content,
+        state.selected_language,
+    );
+    let bottom_panel = build_bottom_panel(&state);
 
     let mut content = column![
         row![language_selector, column![].width(Length::Fill), run_button,]
@@ -942,19 +926,37 @@ pub fn build_code_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
     .spacing(0);
 
     if state.show_algorithm_templates {
-        let template_selector = build_algorithm_template_selector(state.selected_algorithm_template);
-        let apply_button = build_template_button("Apply Template", Input::ApplyAlgorithmTemplate);
-        let branch_button = build_template_button("New From Template", Input::CreateTemplateTab);
+        let template_selector = build_algorithm_template_selector(
+            &state.available_templates,
+            state.selected_algorithm_template.clone(),
+        );
+        let template_meta = state.selected_algorithm_description.clone().unwrap_or_else(|| {
+            "Select a template from algorithm_templates/manifest.json.".to_string()
+        });
+
+        let lock_icon: Element<'_, Input> = if state.selected_algorithm_is_read_only {
+            text("⊘")
+                .size(12)
+                .color(Color::from_rgb(0.72, 0.73, 0.78))
+                .into()
+        } else {
+            container(text("").size(1)).width(Length::Shrink).into()
+        };
 
         content = content.push(column![].height(8)).push(
-            row![
-                text("Template").size(11),
-                template_selector,
-                apply_button,
-                branch_button,
+            column![
+                row![
+                    text("Template").size(11),
+                    template_selector,
+                    lock_icon,
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+                text(template_meta)
+                    .size(11)
+                    .color(Color::from_rgb(0.57, 0.60, 0.68)),
             ]
-            .spacing(8)
-            .align_y(Alignment::Center),
+            .spacing(6),
         );
     }
 
