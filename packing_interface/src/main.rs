@@ -1,3 +1,4 @@
+mod algorithm_templates;
 mod canvas;
 mod config_parser;
 mod editor;

@@ -1,6 +1,7 @@
+use crate::algorithm_templates::{self, AlgorithmTemplate};
 use crate::config_parser::create_input;
 use crate::editor::{build_code_panel, EditorState};
-use crate::runner::{RunResult, run_code, run_code_with_testcase, run_repack_code_with_testcase};
+use crate::runner::{RunResult, run_code_with_testcase, run_repack_code_with_testcase};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, text_editor, scrollable, slider};
 use iced::{Element, Theme, Alignment, Length, Color, Font, time, Subscription};
 use std::collections::HashSet;
@@ -8,137 +9,6 @@ use iced::widget::canvas::Canvas;
 use crate::types::{AlgoTab, AlgorithmOutput, BinCanvas, BottomPanelTab, CodeLanguage, Input, JsonInput, MultipleRunResult, PackingApp, ParseOutput, Rectangle, RightPanelTab, SelectionRegion, Settings, NonEmptySpace, Placement, WorkspaceTab};
 use std::time::Duration;
 use ordered_float::OrderedFloat;
-use rand::Rng;
-
-const CPP_ROOT_CODE: &str = r#"#include "packing_lib.h"
-using namespace packing;
-
-class Packing {
-public:
-    // rectangles: each element is (width, height, quantity)
-    // returns:    placements as (x, y, width, height)
-    std::vector<std::tuple<double, double, int, int>> solve(
-        int binWidth,
-        const std::vector<std::tuple<int, int, int>>& rectangles
-    ) {
-        auto items = expand_items(rectangles);
-
-        std::vector<std::tuple<double, double, int, int>> placements;
-        double y = 0.0;
-        for (const auto& item : items) {
-            placements.push_back({0.0, y, item.width, item.height});
-            y += item.height;
-        }
-        return placements;
-    }
-};
-"#;
-
-const CPP_NODE_CODE: &str = r#"#include "packing_lib.h"
-using namespace packing;
-
-class Repacking {
-public:
-    // rectangles: each element is (width, height, quantity)
-    // obstacles:  Obstacle { x1, x2, y1, y2 } — regions already occupied
-    // returns:    placements as (x, y, width, height)
-    std::vector<std::tuple<double, double, int, int>> solve(
-        int binHeight,
-        int binWidth,
-        const std::vector<std::tuple<int, int, int>>& rectangles,
-        const std::vector<Obstacle>& obstacles
-    ) {
-        auto items = expand_items(rectangles);
-
-        std::vector<std::tuple<double, double, int, int>> placements;
-        double y = 0.0;
-        for (const auto& item : items) {
-            placements.push_back({0.0, y, item.width, item.height});
-            y += item.height;
-        }
-        return placements;
-    }
-};
-"#;
-
-const ROOT_CODE: &str = r#"
-import packing_lib
-import json
-from typing import List, Tuple
-
-class Packing:
-    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:
-        items = packing_lib.expand_items(rectangles)
-
-        placements = []
-        total_height = 0
-        for rect in items:
-            w = rect["width"]
-            h = rect["height"]
-
-            placements.append([0, total_height, w, h])
-            total_height += h
-
-        return packing_lib.make_output(bin_width, total_height, placements)
-"#;
-
-const NODE_CODE: &str = r#"
-import packing_lib
-import json
-from typing import List, Tuple
-
-class Repacking:
-    def solve(self, bin_height: int, bin_width: int, rectangles: List[Tuple[int, int, int]], non_empty_space: List[Tuple[int, int]]) -> List[Tuple[float, float, int, int]]:
-        items = packing_lib.expand_items(rectangles)
-
-        items = packing_lib.sort_by_height(items)
-
-        levels = []
-        placements = []
-        current_y = 0
-
-        def intersects_obstacle(x, y, w, h):
-            for o in non_empty_space:
-                ox1, ox2, oy1, oy2 = o["x_1"], o["x_2"], o["y_1"], o["y_2"]
-                if x < ox2 and x + w > ox1 and y < oy2 and y + h > oy1:
-                    return True
-            return False
-
-        for rect in items:
-            w = rect["width"]
-            h = rect["height"]
-
-            placed = False
-
-            for level in levels:
-                if level["used_width"] + w <= bin_width:
-                    x = level["used_width"]
-                    y = level["y"]
-                    if not intersects_obstacle(x, y, w, h):
-                        placements.append([x, y, w, h])
-                        level["used_width"] += w
-                        placed = True
-                        break
-
-            if not placed:
-                # Find next y that doesn't collide with obstacles
-                y = current_y
-                while y < bin_height and intersects_obstacle(0, y, w, h):
-                    y += 1
-                new_level = {
-                    "height": h,
-                    "used_width": w,
-                    "y": y
-                }
-                levels.append(new_level)
-
-                placements.append([0, y, w, h])
-                current_y = y + h
-
-        total_height = sum(level["height"] for level in levels)
-
-        return packing_lib.make_output(bin_width, total_height, placements)
-"#;
 
 impl Default for PackingApp {
     fn default() -> Self {
@@ -158,7 +28,8 @@ impl Default for PackingApp {
                 repacked_indices: Vec::new(),
                 obstacle_spaces: Vec::new(),
                 selection_regions: Vec::new(),
-                code: ROOT_CODE.to_string(),
+                code: algorithm_templates::default_root_code(CodeLanguage::Python).to_string(),
+                algorithm_template: AlgorithmTemplate::Blank,
                 last_right_panel_tab: RightPanelTab::Visualization,
                 algorithm_output: None,
                 parent_output: None,
@@ -186,8 +57,9 @@ impl Default for PackingApp {
             active_tab: RightPanelTab::CodeEditor,
             current_testcase: None,
             testcase_message: None,
-            code_editor_content: text_editor::Content::with_text(ROOT_CODE),
+            code_editor_content: text_editor::Content::with_text(algorithm_templates::default_root_code(CodeLanguage::Python)),
             selected_language: CodeLanguage::Python,
+            template_menu_selection: AlgorithmTemplate::Blank,
             bottom_panel_visible: true,
             bottom_panel_tab: BottomPanelTab::Output,
             code_errors: Vec::new(),
@@ -212,6 +84,8 @@ impl Default for PackingApp {
             unique_types_input: String::new(),
             single_input_size_input: String::new(),
             single_unique_types_input: String::new(),
+            single_bin_width_input: String::new(),
+            batch_bin_width_input: String::new(),
             display_visual: false,
             multiple_test_cases: Vec::new(),
             multiple_testcase_message: None,
@@ -225,7 +99,7 @@ impl Default for PackingApp {
     }
 }
 
-fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32, input_size: Option<i32>, unique_types: Option<usize>) -> Vec<JsonInput> {
+fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32, input_size: Option<i32>, unique_types: Option<usize>, bin_width_override: Option<i32>) -> Vec<JsonInput> {
     let mut ret: Vec<JsonInput> = Vec::new();
     const MIN_HEIGHT: i32 = 1;
     const MAX_HEIGHT: i32 = 20;
@@ -238,10 +112,14 @@ fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32, input_size: Optio
 	let target_total = input_size.unwrap_or(DEFAULT_TOTAL_RECTS).max(MIN_TOTAL_RECTS);
 
 	// Scale bin width with sqrt(target_total) so larger inputs get wider bins
-	let base = ((target_total as f64).sqrt() * 2.0) as i32;
-	let min_bin = base.max(5);
-	let max_bin = (base * 3).max(min_bin + 5);
-	let bin_width = rng.random_range(min_bin..=max_bin);
+	let bin_width = if let Some(bw) = bin_width_override {
+	    bw.max(1)
+	} else {
+	    let base = ((target_total as f64).sqrt() * 2.0) as i32;
+	    let min_bin = base.max(5);
+	    let max_bin = (base * 3).max(min_bin + 5);
+	    rng.random_range(min_bin..=max_bin)
+	};
 
 	let num_types = unique_types.unwrap_or_else(|| rng.random_range(MIN_TYPES..=MAX_TYPES));
 
@@ -314,9 +192,16 @@ impl PackingApp {
                     self.single_unique_types_input = val;
                 }
             }
-	    Input::DisplayVisual(val) => {
-		self.display_visual = val;
-	    }
+            Input::SingleBinWidthChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.single_bin_width_input = val;
+                }
+            }
+            Input::BatchBinWidthChanged(val) => {
+                if val.is_empty() || val.parse::<u32>().is_ok() {
+                    self.batch_bin_width_input = val;
+                }
+            }
             Input::ToggleMultipleResultExpanded(idx) => {
                 if let Some(val) = self.multiple_results_expanded.get_mut(idx) {
                     *val = !*val;
@@ -340,6 +225,23 @@ impl PackingApp {
             }
             Input::CreateNewTab => {
                 self.create_new_tab(None);
+            }
+            Input::AlgorithmTemplateSelected(template) => {
+                self.template_menu_selection = template;
+            }
+            Input::ApplyAlgorithmTemplate => {
+                if self.active_algo_tab().map(|t| !t.selection_regions.iter().any(|r| r.is_inherited)).unwrap_or(true) {
+                    let template = self.template_menu_selection;
+                    let code = template.root_code(self.selected_language);
+                    self.code_editor_content = text_editor::Content::with_text(code);
+                    if let Some(tab) = self.active_algo_tab_mut() {
+                        tab.code = code.to_string();
+                        tab.algorithm_template = template;
+                    }
+                }
+            }
+            Input::CreateTemplateTab => {
+                self.create_template_tab();
             }
             Input::WorkspaceTabSelected(tab) => {
                 self.workspace_tab = tab;
@@ -585,7 +487,6 @@ impl PackingApp {
                     height_changed = self.recalculate_bin_height();
                 }
 
-                // If height changed, clear selection regions for current tab
                 if height_changed {
                     if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
                         tab.selection_regions.clear();
@@ -612,9 +513,6 @@ impl PackingApp {
                     }
                 }
             }
-            Input::SnapAndAdjustHeight => {
-                self.recalculate_bin_height();
-            }
             Input::RightClickCanvas(clicked_rect) => {
                 self.context_menu_visible = false;
                 self.context_menu_region = None;
@@ -628,10 +526,6 @@ impl PackingApp {
                         self.update_active_tab_selection_from_current();
                     }
                 }
-            }
-            Input::LeftClickCanvas() => {
-                self.context_menu_visible = false;
-                self.context_menu_region = None;
             }
             Input::TabSelected(tab) => {
                 self.active_tab = tab;
@@ -716,14 +610,13 @@ impl PackingApp {
             }
             Input::LanguageSelected(lang) => {
                 self.selected_language = lang;
-                let is_node = self.active_algo_tab()
-                    .map(|t| t.selection_regions.iter().any(|r| r.is_inherited))
-                    .unwrap_or(false);
-                let default_code = match (lang, is_node) {
-                    (CodeLanguage::Cpp, false) => CPP_ROOT_CODE,
-                    (CodeLanguage::Cpp, true)  => CPP_NODE_CODE,
-                    (_, false) => ROOT_CODE,
-                    (_, true)  => NODE_CODE,
+                let (is_node, template) = self.active_algo_tab()
+                    .map(|tab| (tab.selection_regions.iter().any(|r| r.is_inherited), tab.algorithm_template))
+                    .unwrap_or((false, AlgorithmTemplate::Blank));
+                let default_code = if is_node {
+                    algorithm_templates::default_node_code(lang)
+                } else {
+                    template.root_code(lang)
                 };
                 self.code_editor_content = text_editor::Content::with_text(default_code);
                 if let Some(tab) = self.active_algo_tab_mut() {
@@ -902,30 +795,8 @@ impl PackingApp {
 			}
 		    }
                 } else {
-                    let test_cases = self.multiple_test_cases.clone();
-                    let user_code = self.code_editor_content.text();
-                    let language = self.selected_language;
-                    let results: Vec<MultipleRunResult> = test_cases.iter().map(|testcase| {
-                        let run_result = run_code_with_testcase(language, &user_code, testcase);
-                        let (height, output) = match run_result {
-                            RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
-                            RunResult::Error { .. } => (None, None),
-                        };
-                        MultipleRunResult { testcase: testcase.clone(), height, output, tab_id: None }
-                    }).collect();
-                    let n = results.len();
-                    self.multiple_results_expanded = vec![false; n];
-                    self.multiple_run_results = results;
-                    self.active_tab = RightPanelTab::CodeEditor;
-                    self.bottom_panel_tab = BottomPanelTab::Output;
-                    self.error_message = Some(format!("✓ Batch run completed for {} test cases", n));
+                    self.batch_run();
                 }
-            }
-            Input::BottomPanelTabSelected(tab) => {
-                self.bottom_panel_tab = tab;
-            }
-            Input::ToggleBottomPanel => {
-                self.bottom_panel_visible = !self.bottom_panel_visible;
             }
             Input::SaveOutputToFile => {
                 if let Some(json) = &self.code_output_json && let Some(path) = rfd::FileDialog::new()
@@ -977,7 +848,8 @@ impl PackingApp {
                 let mut rng = rand::rng();
                 let input_size = self.single_input_size_input.parse::<i32>().ok();
                 let unique_types = self.single_unique_types_input.parse::<usize>().ok();
-                let testcase = generate_random_test_case(&mut rng, 1, input_size, unique_types);
+                let bin_width = self.single_bin_width_input.parse::<i32>().ok();
+                let testcase = generate_random_test_case(&mut rng, 1, input_size, unique_types, bin_width);
                 let msg = format!(
                     "Generated: {} rectangles, {} types, bin width {}",
                     testcase[0].number_of_rectangles,
@@ -991,11 +863,15 @@ impl PackingApp {
                 let mut rng = rand::rng();
                 let input_size = self.input_size_input.parse::<i32>().ok();
                 let unique_types = self.unique_types_input.parse::<usize>().ok();
-                self.multiple_test_cases = generate_random_test_case(&mut rng, n, input_size, unique_types);
+                let bin_width = self.batch_bin_width_input.parse::<i32>().ok();
+                self.multiple_test_cases = generate_random_test_case(&mut rng, n, input_size, unique_types, bin_width);
                 self.multiple_run_results.clear();
                 self.multiple_results_expanded.clear();
                 let msg = format!("Generated: {} test cases", self.multiple_test_cases.len());
                 self.multiple_testcase_message = Some(msg);
+                if self.multiple_testcase_message.is_some() {
+                    self.batch_run();
+                }
             }
             Input::ToggleAreaSelectEnabled(enabled) => {
                 self.settings.area_select_enabled = enabled;
@@ -1008,9 +884,6 @@ impl PackingApp {
                 if enabled {
                     self.apply_auto_minimize_height();
                 }
-            }
-            Input::ToggleSettingsPanel => {
-                self.settings_panel_visible = !self.settings_panel_visible;
             }
             Input::AreaSelectStart(x, y) => {
                 self.is_area_selecting = true;
@@ -1187,7 +1060,7 @@ impl PackingApp {
                         .count();
 
                     let new_name = format!("{}{}", prefix, child_count + 1);
-                        let new_code: String = NODE_CODE.to_string();
+                        let new_code: String = algorithm_templates::default_node_code(self.selected_language).to_string();
 
                         self.algo_tabs[tab_idx].code = new_code.clone(); 
 
@@ -1203,7 +1076,6 @@ impl PackingApp {
                             selected_indices: Vec::new(),
                         };
 
-                        // New tab inherits parent's code and visualization
                         let (parent_output, parent_revision, parent_visible, parent_animating) = if let Some(parent_tab) = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id) {
                             (parent_tab.algorithm_output.clone(), parent_tab.output_revision, parent_tab.visible_rects, parent_tab.animating)
                         } else {
@@ -1218,6 +1090,7 @@ impl PackingApp {
                             obstacle_spaces: Vec::new(),
                             selection_regions: vec![inherited_region],
                             code: new_code,
+                            algorithm_template: AlgorithmTemplate::Blank,
                             last_right_panel_tab: RightPanelTab::Visualization,
                             algorithm_output: parent_output.clone(),
                             parent_output,
@@ -1367,6 +1240,25 @@ if !self.settings.snap_to_rectangles_enabled {
 }
 
 
+fn batch_run(&mut self) {
+    let test_cases = self.multiple_test_cases.clone();
+    let user_code = self.code_editor_content.text();
+    let language = self.selected_language;
+    let results: Vec<MultipleRunResult> = test_cases.iter().map(|testcase| {
+    let run_result = run_code_with_testcase(language, &user_code, testcase);
+    let (height, output) = match run_result {
+        RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
+        RunResult::Error { .. } => (None, None),
+    };
+    MultipleRunResult { testcase: testcase.clone(), height, output, tab_id: None }
+        }).collect();
+    let n = results.len();
+    self.multiple_results_expanded = vec![false; n];
+    self.multiple_run_results = results;
+    self.active_tab = RightPanelTab::CodeEditor;
+    self.bottom_panel_tab = BottomPanelTab::Output;
+    self.error_message = Some(format!("✓ Batch run completed for {} test cases", n));
+}
 
 fn snap_to_rectangles(
     &self,
@@ -1885,29 +1777,66 @@ fn snap_to_rectangles(
     }
 
     fn create_new_tab(&mut self, output: Option<&AlgorithmOutput>) -> u64 {
-	let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Base Layout")).count();
-	let name = format!("Base Layout {}", root_count + 1);
-	let new_id = self.next_algo_tab_id;
-	self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
-	self.algo_tabs.push(AlgoTab {
-	    id: new_id,
-	    name,
-	    selected_indices: Vec::new(),
-	    repacked_indices: Vec::new(),
-	    obstacle_spaces: Vec::new(),
-	    selection_regions: Vec::new(),
-	    code: self.code_editor_content.text(),
-	    last_right_panel_tab: RightPanelTab::Visualization,
-	    algorithm_output: output.cloned(),
-	    parent_output: None,
-	    repack_output: None,
-	    output_revision: if output.is_some() { 1 } else { 0 },
-	    hit_grid: None,
-	    visible_rects: output.map(|o| o.placements.len()).unwrap_or(0),
-	    animating: false,
-	});
-	self.set_active_algo_tab(new_id);
-	new_id
+        let root_count = self.algo_tabs.iter().filter(|t| t.name.starts_with("Base Layout")).count();
+        let name = format!("Base Layout {}", root_count + 1);
+        let new_id = self.next_algo_tab_id;
+        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+        let template = self.active_algo_tab().map(|tab| tab.algorithm_template).unwrap_or(AlgorithmTemplate::Blank);
+        self.algo_tabs.push(AlgoTab {
+            id: new_id,
+            name,
+            selected_indices: Vec::new(),
+            repacked_indices: Vec::new(),
+            obstacle_spaces: Vec::new(),
+            selection_regions: Vec::new(),
+            code: self.code_editor_content.text(),
+            algorithm_template: template,
+            last_right_panel_tab: RightPanelTab::Visualization,
+            algorithm_output: output.cloned(),
+            parent_output: None,
+            repack_output: None,
+            output_revision: if output.is_some() { 1 } else { 0 },
+            hit_grid: None,
+            visible_rects: output.map(|o| o.placements.len()).unwrap_or(0),
+            animating: false,
+        });
+        self.set_active_algo_tab(new_id);
+        new_id
+    }
+
+    fn create_template_tab(&mut self) {
+        let template = self.template_menu_selection;
+        let name = self.next_template_tab_name(template);
+        let code = template.root_code(self.selected_language).to_string();
+        let new_id = self.next_algo_tab_id;
+        self.next_algo_tab_id = self.next_algo_tab_id.wrapping_add(1);
+
+        self.algo_tabs.push(AlgoTab {
+            id: new_id,
+            name,
+            selected_indices: Vec::new(),
+            repacked_indices: Vec::new(),
+            obstacle_spaces: Vec::new(),
+            selection_regions: Vec::new(),
+            code,
+            algorithm_template: template,
+            last_right_panel_tab: RightPanelTab::CodeEditor,
+            algorithm_output: None,
+            parent_output: None,
+            repack_output: None,
+            output_revision: 0,
+            hit_grid: None,
+            visible_rects: 0,
+            animating: false,
+        });
+        self.set_active_algo_tab(new_id);
+        self.active_tab = RightPanelTab::CodeEditor;
+    }
+
+    fn next_template_tab_name(&self, template: AlgorithmTemplate) -> String {
+        let prefix = format!("{} Template", template.label());
+        let count = self.algo_tabs.iter().filter(|tab| tab.name.starts_with(&prefix)).count();
+        format!("{} {}", prefix, count + 1)
     }
 
     fn set_active_algo_tab(&mut self, tab_id: u64) {
@@ -1926,6 +1855,7 @@ fn snap_to_rectangles(
         // Load new tab's code
         if let Some(new_tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
             self.code_editor_content = text_editor::Content::with_text(&new_tab.code);
+            self.template_menu_selection = new_tab.algorithm_template;
             self.selected_rects.clear();
             for idx in &new_tab.selected_indices {
                 self.selected_rects.insert(*idx);
@@ -3110,6 +3040,12 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             };
 
             // ── batch ─────────────────────────────────────────────────────
+            let batch_bin_width_field = text_input("Random", &self.batch_bin_width_input)
+                .on_input(Input::BatchBinWidthChanged)
+                .size(13)
+                .padding([9, 12])
+                .width(Length::FillPortion(1));
+
             let input_size_placeholder = if self.input_size_input.is_empty() { "100" } else { "" };
             let input_size_field = text_input(input_size_placeholder, &self.input_size_input)
                 .on_input(Input::InputSizeChanged)
@@ -3130,9 +3066,17 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                 .width(Length::FillPortion(1));
 
             let batch_count = self.num_test_cases_input.parse::<i32>().unwrap_or(0);
-            let batch_enabled = batch_count > 0;
+            let mut check_less_than: bool = true;
+            if !self.unique_types_input.is_empty() {
+                if let Ok(temp) = self.unique_types_input.parse::<i32>() {
+                    check_less_than = temp <= self.input_size_input.parse::<i32>().unwrap_or(-1); 
+                } else {
+                    check_less_than = false;
+                }
+            }
+            let batch_enabled = batch_count > 0 && check_less_than;
             let batch_button = {
-                let mut b = button(text("Generate Batch").size(13).font(ui_font))
+                let mut b = button(text("Run Batch").size(13).font(ui_font))
                     .padding([9, 18])
                     .width(Length::Shrink)
                     .style(move |_theme: &Theme, status| button::Style {
@@ -3154,15 +3098,19 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                     });
                 if batch_enabled {
                     b = b.on_press(Input::GenerateMultipleTestCases(batch_count));
+                    if !self.multiple_test_cases.is_empty() {
+                        b = b.on_press(Input::RunCode(2));
+                    }
                 }
                 b
             };
+
 
             let batch_status: Element<'_, Input> = {
                 let (icon, msg, color) = if self.multiple_test_cases.is_empty() {
                     ("○", "No batch generated".to_string(), Color::from_rgb(0.42, 0.44, 0.52))
                 } else {
-                    ("●", format!("{} cases ready to run", self.multiple_test_cases.len()), Color::from_rgb(0.55, 0.75, 0.60))
+                    ("●", format!("{} cases running", self.multiple_test_cases.len()), Color::from_rgb(0.55, 0.75, 0.60))
                 };
                 row![
                     text(icon).size(10).font(ui_font).style(move |_: &Theme| text::Style { color: Some(color) }),
@@ -3173,32 +3121,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                 .into()
             };
 
-            let run_batch_row: Element<'_, Input> = if !self.multiple_test_cases.is_empty() {
-                let run_batch_button = button(text("Run Batch").size(13).font(ui_font))
-                    .on_press(Input::RunCode(2))
-                    .padding([9, 18])
-                    .style(|_theme: &Theme, status| button::Style {
-                        background: Some(match status {
-                            button::Status::Hovered => Color::from_rgb(0.20, 0.50, 0.30).into(),
-                            _ => Color::from_rgb(0.15, 0.42, 0.24).into(),
-                        }),
-                        border: iced::Border {
-                            color: Color::from_rgb(0.25, 0.52, 0.34),
-                            width: 1.0,
-                            radius: 6.0.into(),
-                        },
-                        text_color: Color::from_rgb(0.88, 0.96, 0.90),
-                        ..Default::default()
-                    });
-                row![
-                    column![].width(Length::Fill),
-                    run_batch_button,
-                ]
-                .align_y(Alignment::Center)
-                .into()
-            } else {
-                column![].into()
-            };
 
             column![
                 section_title("Import / Generate Test Cases"),
@@ -3213,6 +3135,13 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                             .style(|_: &Theme| text::Style { color: Some(Color::from_rgb(0.62, 0.65, 0.76)) }),
                         column![].height(10),
                         row![
+                            column![
+                                field_label("Bin width"),
+                                column![].height(5),
+                                text_input("Random", &self.single_bin_width_input)
+                                    .on_input(Input::SingleBinWidthChanged)
+                                    .size(13).padding([9, 12]).width(Length::Fill),
+                            ].width(Length::Fill),
                             column![
                                 field_label("Input size"),
                                 column![].height(5),
@@ -3245,16 +3174,16 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
 
                 column![].height(12),
 
-                // ── batch box ─────────────────────────────────────────────
                 container(
                     column![
                         text("Batch Run").size(12).font(ui_font)
                             .style(|_: &Theme| text::Style { color: Some(Color::from_rgb(0.62, 0.65, 0.76)) }),
                         column![].height(10),
                         row![
-                            column![field_label("Input size"),  column![].height(5), input_size_field ].width(Length::Fill),
-                            column![field_label("Unique types"), column![].height(5), unique_types_field].width(Length::Fill),
-                            column![field_label("Count"),        column![].height(5), batch_count_field ].width(Length::Fill),
+                            column![field_label("Bin width"),    column![].height(5), batch_bin_width_field].width(Length::Fill),
+                            column![field_label("Input size"),   column![].height(5), input_size_field     ].width(Length::Fill),
+                            column![field_label("Unique types"), column![].height(5), unique_types_field   ].width(Length::Fill),
+                            column![field_label("Count"),        column![].height(5), batch_count_field    ].width(Length::Fill),
                         ]
                         .spacing(10),
                         column![].height(12),
@@ -3264,7 +3193,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                             batch_button,
                         ]
                         .align_y(Alignment::Center),
-                        run_batch_row,
                     ]
                     .spacing(0)
                 )
@@ -3580,6 +3508,7 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
         let editor_state = EditorState {
             code_editor_content: &self.code_editor_content,
             selected_language: self.selected_language,
+            selected_algorithm_template: self.template_menu_selection,
             bottom_panel_visible: self.bottom_panel_visible,
             bottom_panel_tab: self.bottom_panel_tab,
             code_errors: &self.code_errors,
@@ -3598,6 +3527,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
+            show_algorithm_templates: self.selected_language == CodeLanguage::Python && self.active_algo_tab()
+                .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
+                .unwrap_or(true),
         };
         let code_panel_content = {
             use iced::widget::mouse_area;
