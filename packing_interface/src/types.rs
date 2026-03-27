@@ -24,7 +24,7 @@ pub enum BottomPanelTab {
     MultipleTestCases,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CodeLanguage {
     Python,
     Cpp,

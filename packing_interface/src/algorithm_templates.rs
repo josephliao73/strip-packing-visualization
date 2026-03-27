@@ -1,6 +1,5 @@
 use crate::types::CodeLanguage;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,22 +10,19 @@ pub struct AlgorithmTemplateEntry {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub python_path: Option<String>,
-    pub cpp_path: Option<String>,
+    pub language: CodeLanguage,
+    pub path: Option<String>,
     #[serde(default)]
     pub builtin: bool,
     #[serde(default = "default_true")]
     pub editable: bool,
+    #[serde(default = "default_true")]
     pub is_root: bool,
 }
 
 impl AlgorithmTemplateEntry {
     pub fn supports_language(&self, language: CodeLanguage) -> bool {
-        match language {
-            CodeLanguage::Cpp => self.cpp_path.is_some(),
-            CodeLanguage::Python => self.python_path.is_some(),
-            CodeLanguage::Java => false,
-        }
+        self.language == language
     }
 
     pub fn is_create_new(&self) -> bool {
@@ -38,10 +34,10 @@ impl AlgorithmTemplateEntry {
     }
 
     pub fn path_for_language(&self, language: CodeLanguage) -> Option<&str> {
-        match language {
-            CodeLanguage::Cpp => self.cpp_path.as_deref(),
-            CodeLanguage::Python => self.python_path.as_deref(),
-            CodeLanguage::Java => None,
+        if self.language == language {
+            self.path.as_deref()
+        } else {
+            None
         }
     }
 }
@@ -59,24 +55,9 @@ impl std::fmt::Display for AlgorithmTemplateEntry {
 }
 
 pub fn load_root_templates() -> Vec<AlgorithmTemplateEntry> {
-    let manifest_path = template_dir().join("manifest.json");
-    fs::read_to_string(&manifest_path)
-        .ok()
-        .and_then(|contents| serde_json::from_str::<Vec<AlgorithmTemplateEntry>>(&contents).ok())
-        .map(|templates| {
-            templates
-                .into_iter()
-                .filter(template_files_exist)
-                .collect::<Vec<_>>()
-        })
-        .filter(|templates| !templates.is_empty())
-        .unwrap_or_else(fallback_root_templates)
-}
-
-pub fn load_root_template_map() -> HashMap<String, AlgorithmTemplateEntry> {
-    load_root_templates()
+    load_templates()
         .into_iter()
-        .map(|template| (template.id.clone(), template))
+        .filter(|template| template.is_root)
         .collect()
 }
 
@@ -86,7 +67,7 @@ pub fn templates_for_language(
 ) -> Vec<AlgorithmTemplateEntry> {
     let mut filtered: Vec<_> = templates
         .iter()
-        .filter(|template| template.supports_language(language))
+        .filter(|template| template.is_root && template.supports_language(language))
         .cloned()
         .collect();
 
@@ -103,19 +84,23 @@ pub fn default_root_template_for_language(
 ) -> AlgorithmTemplateEntry {
     templates
         .iter()
-        .find(|template| template.id == "blank" && template.supports_language(language))
+        .find(|template| {
+            template.is_root
+                && template.supports_language(language)
+                && template.name.eq_ignore_ascii_case("Blank")
+        })
         .cloned()
         .or_else(|| {
             templates
                 .iter()
-                .find(|template| template.supports_language(language))
+                .find(|template| template.is_root && template.supports_language(language))
                 .cloned()
         })
         .unwrap_or_else(|| {
-            fallback_root_templates()
+            fallback_templates()
                 .into_iter()
-                .find(|template| template.supports_language(language))
-                .unwrap_or_else(|| fallback_root_templates().into_iter().next().unwrap())
+                .find(|template| template.is_root && template.supports_language(language))
+                .unwrap_or_else(|| fallback_templates().into_iter().next().unwrap())
         })
 }
 
@@ -123,11 +108,7 @@ pub fn load_root_template_code(
     template: &AlgorithmTemplateEntry,
     language: CodeLanguage,
 ) -> Result<String, String> {
-    let relative_path = match language {
-        CodeLanguage::Cpp => template.cpp_path.as_ref(),
-        _ => template.python_path.as_ref(),
-    }
-    .ok_or_else(|| {
+    let relative_path = template.path_for_language(language).ok_or_else(|| {
         format!(
             "Template '{}' does not define a {} file.",
             template.name,
@@ -204,11 +185,12 @@ pub fn create_custom_template(
         return Err("Template name is required.".to_string());
     }
 
-    let mut templates = load_root_templates();
-    if templates
-        .iter()
-        .any(|template| template.name.eq_ignore_ascii_case(display_name))
-    {
+    let mut templates = load_templates();
+    if templates.iter().any(|template| {
+        template.is_root
+            && template.language == language
+            && template.name.eq_ignore_ascii_case(display_name)
+    }) {
         return Err(format!("A template named '{}' already exists.", display_name));
     }
 
@@ -219,6 +201,11 @@ pub fn create_custom_template(
         .path_for_language(language)
         .ok_or_else(|| "New template did not get a file path.".to_string())?;
     let full_path = template_dir().join(relative_path);
+
+    if let Some(parent) = full_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create {}: {}", parent.display(), error))?;
+    }
 
     fs::write(&full_path, code)
         .map_err(|error| format!("Failed to create template file {}: {}", full_path.display(), error))?;
@@ -251,9 +238,24 @@ pub fn save_custom_template_code(
 
 pub fn default_node_code(language: CodeLanguage) -> &'static str {
     match language {
-        CodeLanguage::Cpp => include_str!("algorithm_templates/node.cpp"),
-        _ => include_str!("algorithm_templates/node.py"),
+        CodeLanguage::Cpp => include_str!("algorithm_templates/cpp/node/default.cpp"),
+        _ => include_str!("algorithm_templates/python/node/default.py"),
     }
+}
+
+fn load_templates() -> Vec<AlgorithmTemplateEntry> {
+    let manifest_path = template_dir().join("manifest.json");
+    fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Vec<AlgorithmTemplateEntry>>(&contents).ok())
+        .map(|templates| {
+            templates
+                .into_iter()
+                .filter(template_files_exist)
+                .collect::<Vec<_>>()
+        })
+        .filter(|templates| !templates.is_empty())
+        .unwrap_or_else(fallback_templates)
 }
 
 fn build_custom_template_entry(
@@ -282,7 +284,12 @@ fn build_custom_template_entry(
             continue;
         }
 
-        let file_name = format!("{}.{}", id, extension);
+        let relative_path = format!(
+            "{}/root/{}.{}",
+            language_dir(language),
+            id,
+            extension
+        );
         return AlgorithmTemplateEntry {
             id,
             name: display_name.to_string(),
@@ -291,8 +298,8 @@ fn build_custom_template_entry(
             } else {
                 description.to_string()
             },
-            python_path: (language == CodeLanguage::Python).then_some(file_name.clone()),
-            cpp_path: (language == CodeLanguage::Cpp).then_some(file_name),
+            language,
+            path: Some(relative_path),
             builtin: false,
             editable: true,
             is_root: true,
@@ -324,24 +331,15 @@ fn sanitize_template_slug(name: &str) -> String {
 }
 
 fn template_files_exist(template: &AlgorithmTemplateEntry) -> bool {
-    let dir = template_dir();
-    let mut found = false;
-
-    if let Some(path) = &template.python_path {
-        found = true;
-        if !dir.join(path).exists() {
-            return false;
-        }
+    if template.is_create_new() {
+        return true;
     }
 
-    if let Some(path) = &template.cpp_path {
-        found = true;
-        if !dir.join(path).exists() {
-            return false;
-        }
-    }
-
-    found || template.is_create_new()
+    template
+        .path
+        .as_ref()
+        .map(|path| template_dir().join(path).exists())
+        .unwrap_or(false)
 }
 
 fn create_new_entry(language: CodeLanguage) -> AlgorithmTemplateEntry {
@@ -349,11 +347,12 @@ fn create_new_entry(language: CodeLanguage) -> AlgorithmTemplateEntry {
         id: CREATE_NEW_TEMPLATE_ID.to_string(),
         name: "Create New".to_string(),
         description: format!(
-            "Create a new editable {} template saved under algorithm_templates/.",
-            language_label(language)
+            "Create a new editable {} template saved under algorithm_templates/{}/root/.",
+            language_label(language),
+            language_dir(language)
         ),
-        python_path: None,
-        cpp_path: None,
+        language,
+        path: None,
         builtin: false,
         editable: false,
         is_root: true,
@@ -364,12 +363,21 @@ fn save_manifest(templates: &[AlgorithmTemplateEntry]) -> Result<(), String> {
     let manifest_path = template_dir().join("manifest.json");
     let contents = serde_json::to_string_pretty(templates)
         .map_err(|error| format!("Failed to serialize template manifest: {}", error))?;
-    fs::write(&manifest_path, format!("{}\n", contents))
+    fs::write(&manifest_path, format!("{}
+", contents))
         .map_err(|error| format!("Failed to write {}: {}", manifest_path.display(), error))
 }
 
 fn template_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/algorithm_templates")
+}
+
+fn language_dir(language: CodeLanguage) -> &'static str {
+    match language {
+        CodeLanguage::Cpp => "cpp",
+        CodeLanguage::Python => "python",
+        CodeLanguage::Java => "java",
+    }
 }
 
 fn language_label(language: CodeLanguage) -> &'static str {
@@ -384,57 +392,107 @@ fn default_true() -> bool {
     true
 }
 
-fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
+fn fallback_templates() -> Vec<AlgorithmTemplateEntry> {
     vec![
         AlgorithmTemplateEntry {
-            id: "blank".to_string(),
+            id: "blank_python".to_string(),
             name: "Blank".to_string(),
             description: "Minimal starter template using the helper library.".to_string(),
-            python_path: Some("blank_root.py".to_string()),
-            cpp_path: Some("blank_root.cpp".to_string()),
+            language: CodeLanguage::Python,
+            path: Some("python/root/blank.py".to_string()),
             builtin: true,
             editable: false,
             is_root: true,
         },
         AlgorithmTemplateEntry {
-            id: "nfdh".to_string(),
+            id: "blank_cpp".to_string(),
+            name: "Blank".to_string(),
+            description: "Minimal starter template using the helper library.".to_string(),
+            language: CodeLanguage::Cpp,
+            path: Some("cpp/root/blank.cpp".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: true,
+        },
+        AlgorithmTemplateEntry {
+            id: "nfdh_python".to_string(),
             name: "NFDH".to_string(),
             description: "Next-Fit Decreasing Height strip packing.".to_string(),
-            python_path: Some("nfdh.py".to_string()),
-            cpp_path: Some("nfdh.cpp".to_string()),
+            language: CodeLanguage::Python,
+            path: Some("python/root/nfdh.py".to_string()),
             builtin: true,
             editable: false,
             is_root: true,
         },
         AlgorithmTemplateEntry {
-            id: "ffdh".to_string(),
+            id: "nfdh_cpp".to_string(),
+            name: "NFDH".to_string(),
+            description: "Next-Fit Decreasing Height strip packing.".to_string(),
+            language: CodeLanguage::Cpp,
+            path: Some("cpp/root/nfdh.cpp".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: true,
+        },
+        AlgorithmTemplateEntry {
+            id: "ffdh_python".to_string(),
             name: "FFDH".to_string(),
             description: "First-Fit Decreasing Height strip packing.".to_string(),
-            python_path: Some("ffdh.py".to_string()),
-            cpp_path: Some("ffdh.cpp".to_string()),
+            language: CodeLanguage::Python,
+            path: Some("python/root/ffdh.py".to_string()),
             builtin: true,
             editable: false,
             is_root: true,
         },
         AlgorithmTemplateEntry {
-            id: "fspp".to_string(),
+            id: "ffdh_cpp".to_string(),
+            name: "FFDH".to_string(),
+            description: "First-Fit Decreasing Height strip packing.".to_string(),
+            language: CodeLanguage::Cpp,
+            path: Some("cpp/root/ffdh.cpp".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: true,
+        },
+        AlgorithmTemplateEntry {
+            id: "fspp_python".to_string(),
             name: "FSPP".to_string(),
             description: "Fractional strip-packing template.".to_string(),
-            python_path: Some("fspp.py".to_string()),
-            cpp_path: None,
+            language: CodeLanguage::Python,
+            path: Some("python/root/fspp.py".to_string()),
             builtin: true,
             editable: false,
             is_root: true,
         },
         AlgorithmTemplateEntry {
-            id: "three_fspp".to_string(),
+            id: "three_fspp_python".to_string(),
             name: "3FSPP".to_string(),
             description: "Three-strip fractional strip-packing template.".to_string(),
-            python_path: Some("three_fspp.py".to_string()),
-            cpp_path: None,
+            language: CodeLanguage::Python,
+            path: Some("python/root/three_fspp.py".to_string()),
             builtin: true,
             editable: false,
             is_root: true,
+        },
+        AlgorithmTemplateEntry {
+            id: "default_node_python".to_string(),
+            name: "Default Node".to_string(),
+            description: "Default Python repacking template.".to_string(),
+            language: CodeLanguage::Python,
+            path: Some("python/node/default.py".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: false,
+        },
+        AlgorithmTemplateEntry {
+            id: "default_node_cpp".to_string(),
+            name: "Default Node".to_string(),
+            description: "Default C++ repacking template.".to_string(),
+            language: CodeLanguage::Cpp,
+            path: Some("cpp/node/default.cpp".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: false,
         },
     ]
 }
