@@ -20,7 +20,7 @@ fn main() -> iced::Result {
         let temp_str: String = args[i].to_lowercase();
         if lang_map.contains_key(&temp_str) {
             if !lang_map[&temp_str] {
-            lang_map.insert(temp_str, false);
+            lang_map.insert(temp_str, true);
             } else {
                 println!("Repeated argument!");
                 break;

@@ -7,6 +7,8 @@ use iced::{mouse, Alignment, Color, Element, Font, Length, Theme};
 pub struct EditorState<'a> {
     pub code_editor_content: &'a text_editor::Content,
     pub selected_language: CodeLanguage,
+    pub python_available: bool,
+    pub cpp_available: bool,
     pub selected_algorithm_template: Option<AlgorithmTemplateEntry>,
     pub available_templates: &'a [AlgorithmTemplateEntry],
     pub selected_algorithm_description: Option<String>,
@@ -36,9 +38,9 @@ pub struct EditorState<'a> {
 }
 
 
-fn build_language_selector(language: CodeLanguage) -> Element<'static, Input> {
+fn build_language_selector(languages: &'static [CodeLanguage], language: CodeLanguage) -> Element<'static, Input> {
     pick_list(
-        &[CodeLanguage::Python, CodeLanguage::Cpp][..],
+        languages,
         Some(language),
         Input::LanguageSelected,
     )
@@ -301,7 +303,7 @@ fn build_save_output_button() -> Element<'static, Input> {
     .into()
 }
 
-fn build_output_content<'a>(json: Option<&'a str>) -> Element<'a, Input> {
+fn build_output_content<'a>(json: Option<&'a str>, errors: &'a [String]) -> Element<'a, Input> {
     let ui_font = Font::default();
 
     if let Some(json) = json {
@@ -340,6 +342,53 @@ fn build_output_content<'a>(json: Option<&'a str>) -> Element<'a, Input> {
                     |_theme: &Theme| {
                         text::Style {
                             color: Some(Color::from_rgb(0.75, 0.85, 0.75)),
+                        }
+                    }
+                ))
+                .padding(10)
+                .width(Length::Fill)
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(0)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else if !errors.is_empty() {
+        let message = errors.join("\n");
+        column![
+            container(
+                row![
+                    text("Execution Error")
+                        .size(11)
+                        .font(ui_font)
+                        .style(|_theme: &Theme| {
+                            text::Style {
+                                color: Some(Color::from_rgb(0.78, 0.60, 0.60)),
+                            }
+                        }),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+            )
+            .padding([8, 10])
+            .width(Length::Fill)
+            .style(|_theme: &Theme| {
+                container::Style {
+                    background: Some(Color::from_rgb(0.055, 0.055, 0.07).into()),
+                    border: iced::Border {
+                        color: Color::from_rgb(0.12, 0.12, 0.15),
+                        width: 0.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }
+            }),
+            scrollable(
+                container(text(message).size(11).font(Font::MONOSPACE).style(
+                    |_theme: &Theme| {
+                        text::Style {
+                            color: Some(Color::from_rgb(0.90, 0.65, 0.65)),
                         }
                     }
                 ))
@@ -864,7 +913,7 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
             state.batch_run_total,
         )
     } else {
-        build_output_content(state.code_output_json)
+        build_output_content(state.code_output_json, state.code_errors)
     };
 
     let resize_handle = mouse_area(
@@ -901,7 +950,12 @@ fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
 }
 
 pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
-    let language_selector = build_language_selector(state.selected_language);
+    let available_languages: &'static [CodeLanguage] = match (state.python_available, state.cpp_available) {
+        (true, true) => &[CodeLanguage::Python, CodeLanguage::Cpp],
+        (true, false) => &[CodeLanguage::Python],
+        (false, true) => &[CodeLanguage::Cpp],
+        (false, false) => &[],
+    };
     let has_testcase: i32 = if !state.is_root {
         1
     } else if state.has_single_testcase {
@@ -918,8 +972,28 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
     );
     let bottom_panel = build_bottom_panel(&state);
 
+    let language_controls: Element<'a, Input> = if available_languages.is_empty() {
+        text("No supported runtimes detected")
+            .size(12)
+            .font(Font::default())
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.78, 0.55, 0.55)),
+            })
+            .into()
+    } else if available_languages.len() == 1 {
+        text(state.selected_language.to_string())
+            .size(12)
+            .font(Font::default())
+            .style(|_theme: &Theme| text::Style {
+                color: Some(Color::from_rgb(0.82, 0.84, 0.92)),
+            })
+            .into()
+    } else {
+        build_language_selector(available_languages, state.selected_language)
+    };
+
     let mut content = column![
-        row![language_selector, column![].width(Length::Fill), run_button,]
+        row![language_controls, column![].width(Length::Fill), run_button,]
             .spacing(8)
             .align_y(Alignment::Center),
     ]

@@ -52,5 +52,14 @@
     "cpp_path": null,
     "builtin": false,
     "editable": true
+  },
+  {
+    "id": "custom_python_custom_python_2_1",
+    "name": "Custom Python 2",
+    "description": "abc",
+    "python_path": "custom_python_custom_python_2_1.py",
+    "cpp_path": null,
+    "builtin": false,
+    "editable": true
   }
 ]

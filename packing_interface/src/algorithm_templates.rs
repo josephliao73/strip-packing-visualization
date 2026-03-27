@@ -17,6 +17,7 @@ pub struct AlgorithmTemplateEntry {
     pub builtin: bool,
     #[serde(default = "default_true")]
     pub editable: bool,
+    pub is_root: bool,
 }
 
 impl AlgorithmTemplateEntry {
@@ -294,6 +295,7 @@ fn build_custom_template_entry(
             cpp_path: (language == CodeLanguage::Cpp).then_some(file_name),
             builtin: false,
             editable: true,
+            is_root: true,
         };
     }
 }
@@ -354,6 +356,7 @@ fn create_new_entry(language: CodeLanguage) -> AlgorithmTemplateEntry {
         cpp_path: None,
         builtin: false,
         editable: false,
+        is_root: true,
     }
 }
 
@@ -391,6 +394,7 @@ fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
             cpp_path: Some("blank_root.cpp".to_string()),
             builtin: true,
             editable: false,
+            is_root: true,
         },
         AlgorithmTemplateEntry {
             id: "nfdh".to_string(),
@@ -400,6 +404,7 @@ fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
             cpp_path: Some("nfdh.cpp".to_string()),
             builtin: true,
             editable: false,
+            is_root: true,
         },
         AlgorithmTemplateEntry {
             id: "ffdh".to_string(),
@@ -409,6 +414,7 @@ fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
             cpp_path: Some("ffdh.cpp".to_string()),
             builtin: true,
             editable: false,
+            is_root: true,
         },
         AlgorithmTemplateEntry {
             id: "fspp".to_string(),
@@ -418,6 +424,7 @@ fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
             cpp_path: None,
             builtin: true,
             editable: false,
+            is_root: true,
         },
         AlgorithmTemplateEntry {
             id: "three_fspp".to_string(),
@@ -427,6 +434,7 @@ fn fallback_root_templates() -> Vec<AlgorithmTemplateEntry> {
             cpp_path: None,
             builtin: true,
             editable: false,
+            is_root: true,
         },
     ]
 }

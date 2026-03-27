@@ -370,6 +370,46 @@ fn serialize_rectangles(rectangles: &[Rectangle]) -> Result<String, RunResult> {
     })
 }
 
+fn validate_repack_output(output: &AlgorithmOutput, non_empty_space: &[NonEmptySpace]) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
+
+    for (placement_index, placement) in output.placements.iter().enumerate() {
+        let x1 = placement.x.into_inner();
+        let y1 = placement.y.into_inner();
+        let x2 = x1 + placement.width as f32;
+        let y2 = y1 + placement.height as f32;
+
+        for (obstacle_index, obstacle) in non_empty_space.iter().enumerate() {
+            let intersects = x1 < obstacle.x_2
+                && x2 > obstacle.x_1
+                && y1 < obstacle.y_2
+                && y2 > obstacle.y_1;
+
+            if intersects {
+                errors.push(format!(
+                    "Repack placement {} intersects obstacle {}: rect=({}, {}, {}, {}), obstacle=({}, {}, {}, {})",
+                    placement_index,
+                    obstacle_index,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    obstacle.x_1,
+                    obstacle.y_1,
+                    obstacle.x_2,
+                    obstacle.y_2,
+                ));
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
 fn parse_output(output: std::io::Result<std::process::Output>, runner_name: &str) -> RunResult {
     match output {
         Ok(out) => {
@@ -422,11 +462,17 @@ pub fn run_repack_code_with_testcase(
     bin_height: f32,
     non_empty_space: &[NonEmptySpace],
 ) -> RunResult {
-    get_runner(language).repack_run(
+    match get_runner(language).repack_run(
         code,
         bin_height,
         testcase.width_of_bin as f32,
         &testcase.rectangle_list,
         non_empty_space,
-    )
+    ) {
+        RunResult::Success { output, raw_json } => match validate_repack_output(&output, non_empty_space) {
+            Ok(()) => RunResult::Success { output, raw_json },
+            Err(errors) => RunResult::Error { errors },
+        },
+        error => error,
+    }
 }

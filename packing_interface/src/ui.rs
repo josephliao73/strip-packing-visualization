@@ -12,7 +12,51 @@ use ordered_float::OrderedFloat;
 use std::collections::HashMap;
 
 impl PackingApp {
+    fn language_enabled_in_map(lang_map: &HashMap<String, bool>, language: CodeLanguage) -> bool {
+        let key = match language {
+            CodeLanguage::Python => "python",
+            CodeLanguage::Cpp => "cpp",
+            CodeLanguage::Java => return false,
+        };
+
+        lang_map.get(key).copied().unwrap_or(false)
+    }
+
+    fn available_languages_from_map(lang_map: &HashMap<String, bool>) -> Vec<CodeLanguage> {
+        [CodeLanguage::Python, CodeLanguage::Cpp]
+            .into_iter()
+            .filter(|language| Self::language_enabled_in_map(lang_map, *language))
+            .collect()
+    }
+
+    fn preferred_language_from_map(lang_map: &HashMap<String, bool>) -> CodeLanguage {
+        Self::available_languages_from_map(lang_map)
+            .into_iter()
+            .next()
+            .unwrap_or(CodeLanguage::Python)
+    }
+
+    fn language_enabled(&self, language: CodeLanguage) -> bool {
+        Self::language_enabled_in_map(&self.lang_map, language)
+    }
+
+    fn available_languages(&self) -> Vec<CodeLanguage> {
+        Self::available_languages_from_map(&self.lang_map)
+    }
+
+    fn normalize_language(&self, language: CodeLanguage) -> CodeLanguage {
+        if self.language_enabled(language) {
+            language
+        } else {
+            self.available_languages()
+                .into_iter()
+                .next()
+                .unwrap_or(CodeLanguage::Python)
+        }
+    }
+
     pub fn default(lang_map: HashMap<String, bool>) -> Self {
+        let initial_language = Self::preferred_language_from_map(&lang_map);
         let available_templates = algorithm_templates::load_root_templates();
         let python_template_options = algorithm_templates::templates_for_language(&available_templates, CodeLanguage::Python);
         let cpp_template_options = algorithm_templates::templates_for_language(&available_templates, CodeLanguage::Cpp);
@@ -30,6 +74,11 @@ impl PackingApp {
             CodeLanguage::Cpp,
         )
         .unwrap_or_else(|_| algorithm_templates::default_root_code(CodeLanguage::Cpp));
+        let initial_code = if initial_language == CodeLanguage::Cpp {
+            initial_cpp_code.clone()
+        } else {
+            initial_python_code.clone()
+        };
 
         Self {
             lang_map: lang_map,
@@ -48,9 +97,13 @@ impl PackingApp {
                 repacked_indices: Vec::new(),
                 obstacle_spaces: Vec::new(),
                 selection_regions: Vec::new(),
-                code: initial_python_code.clone(),
-                language: CodeLanguage::Python,
-                algorithm_template: Some(default_python_template.clone()),
+                code: initial_code.clone(),
+                language: initial_language,
+                algorithm_template: if initial_language == CodeLanguage::Cpp {
+                    Some(default_cpp_template.clone())
+                } else {
+                    Some(default_python_template.clone())
+                },
                 python_code: initial_python_code.clone(),
                 cpp_code: initial_cpp_code,
                 python_template: Some(default_python_template.clone()),
@@ -85,10 +138,10 @@ impl PackingApp {
             active_tab: RightPanelTab::CodeEditor,
             current_testcase: None,
             testcase_message: None,
-            code_editor_content: text_editor::Content::with_text(&initial_python_code),
-            selected_language: CodeLanguage::Python,
-            python_template_menu_selection: Some(default_python_template),
-            cpp_template_menu_selection: Some(default_cpp_template),
+            code_editor_content: text_editor::Content::with_text(&initial_code),
+            selected_language: initial_language,
+            python_template_menu_selection: Some(default_python_template.clone()),
+            cpp_template_menu_selection: Some(default_cpp_template.clone()),
             available_templates,
             python_template_options,
             cpp_template_options,
@@ -278,7 +331,7 @@ impl PackingApp {
                         self.selected_language,
                         Some(template.clone()),
                     );
-                    let language = self.selected_language;
+                    let language = self.normalize_language(self.selected_language);
                     self.code_editor_content = text_editor::Content::with_text(&code);
                     self.set_selected_template_for_language(language, Some(template.clone()));
                     if let Some(tab) = self.active_algo_tab_mut() {
@@ -613,7 +666,32 @@ impl PackingApp {
                     .map(|template| template.is_read_only())
                     .unwrap_or(false);
                 if is_read_only {
-                    return ();
+                    match action {
+                        Action::Click(position) => {
+                            self.code_editor_content.perform(Action::Click(position));
+                            self.code_editor_content.perform(Action::SelectWord);
+                        }
+                        Action::Drag(position) => {
+                            self.code_editor_content.perform(Action::Drag(position));
+                        }
+                        Action::Select(motion) => {
+                            self.code_editor_content.perform(Action::Select(motion));
+                        }
+                        Action::SelectWord => {
+                            self.code_editor_content.perform(Action::SelectWord);
+                        }
+                        Action::SelectLine => {
+                            self.code_editor_content.perform(Action::SelectLine);
+                        }
+                        Action::SelectAll => {
+                            self.code_editor_content.perform(Action::SelectAll);
+                        }
+                        Action::Scroll { lines } => {
+                            self.code_editor_content.perform(Action::Scroll { lines });
+                        }
+                        Action::Move(_) | Action::Edit(_) => {}
+                    }
+                    return;
                 }
 
                 match &action {
@@ -679,6 +757,9 @@ impl PackingApp {
                 self.sync_active_tab_editor_state();
             }
             Input::LanguageSelected(lang) => {
+                if !self.language_enabled(lang) {
+                    return;
+                }
                 self.sync_active_tab_editor_state();
                 self.selected_language = lang;
                 let is_node = self.active_algo_tab()
@@ -1989,10 +2070,8 @@ fn snap_to_rectangles(
         template: Option<AlgorithmTemplateEntry>,
         code: &str,
     ) {
-        if let Some(template) = template {
-            if let Err(error) = algorithm_templates::save_custom_template_code(&template, language, code) {
-                self.error_message = Some(error);
-            }
+        if let Some(template) = template && let Err(error) = algorithm_templates::save_custom_template_code(&template, language, code) {
+            self.error_message = Some(error);    
         }
     }
 
@@ -2003,10 +2082,8 @@ fn snap_to_rectangles(
         template: Option<AlgorithmTemplateEntry>,
     ) -> String {
         if let Some(template) = template {
-            if let Some(tab) = tab {
-                if let Some(draft) = tab.drafts_for_language(language).get(&template.id) {
-                    return draft.clone();
-                }
+            if let Some(tab) = tab && let Some(draft) = tab.drafts_for_language(language).get(&template.id) {
+                return draft.clone();
             }
             algorithm_templates::load_root_template_code(&template, language)
                 .unwrap_or_else(|_| algorithm_templates::default_root_code(language))
@@ -2246,7 +2323,7 @@ fn snap_to_rectangles(
         self.new_area_select = true;
 
         if let Some(new_tab) = self.algo_tabs.iter().find(|t| t.id == tab_id) {
-            let language = new_tab.language;
+            let language = self.normalize_language(new_tab.language);
             let code = new_tab.code_for_language(language);
             let last_right_panel_tab = new_tab.last_right_panel_tab;
             let selected_indices = new_tab.selected_indices.clone();
@@ -3979,14 +4056,17 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
         .width(Length::Fill)
         .padding([4, 8]);
 
+        let current_language = self.normalize_language(self.selected_language);
         let editor_state = EditorState {
             code_editor_content: &self.code_editor_content,
-            selected_language: self.selected_language,
-            selected_algorithm_template: self.selected_template_for_language(self.selected_language),
-            available_templates: self.template_options_for_language(self.selected_language),
-            selected_algorithm_description: self.selected_template_for_language(self.selected_language).map(|template| template.description),
-            selected_algorithm_is_read_only: self.selected_template_for_language(self.selected_language).map(|template| template.is_read_only()).unwrap_or(false),
-            selected_algorithm_is_builtin: self.selected_template_for_language(self.selected_language).map(|template| template.builtin).unwrap_or(false),
+            selected_language: current_language,
+            python_available: self.language_enabled(CodeLanguage::Python),
+            cpp_available: self.language_enabled(CodeLanguage::Cpp),
+            selected_algorithm_template: self.selected_template_for_language(current_language),
+            available_templates: self.template_options_for_language(current_language),
+            selected_algorithm_description: self.selected_template_for_language(current_language).map(|template| template.description),
+            selected_algorithm_is_read_only: self.selected_template_for_language(current_language).map(|template| template.is_read_only()).unwrap_or(false),
+            selected_algorithm_is_builtin: self.selected_template_for_language(current_language).map(|template| template.builtin).unwrap_or(false),
             template_read_only_hovered: self.template_read_only_hovered,
             bottom_panel_visible: self.bottom_panel_visible,
             bottom_panel_tab: self.bottom_panel_tab,
@@ -4006,7 +4086,7 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
-            show_algorithm_templates: matches!(self.selected_language, CodeLanguage::Python | CodeLanguage::Cpp) && self.active_algo_tab()
+            show_algorithm_templates: self.language_enabled(current_language) && matches!(current_language, CodeLanguage::Python | CodeLanguage::Cpp) && self.active_algo_tab()
                 .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
                 .unwrap_or(true),
             batch_run_in_progress: self.batch_run_in_progress,
