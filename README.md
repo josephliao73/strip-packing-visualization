@@ -142,14 +142,13 @@ Node tabs only show algorithms that actually have a node implementation.
 use a root tab for normal packing.
 
 You can:
-- Enter rectangles manually
+- Create input either by entering rectangles manually, generating a random single testcase, generating a random batch of testcases
 - Import a testcase json
-- Generate a random single testcase
-- Generate a random batch of testcases
 - Run a root algorithm
 - See visual output
 - Drag via double left clicking
 - Save output json
+- Right click to select a region that can be used for local repacking
 
 <img width="2884" height="2300" alt="image" src="https://github.com/user-attachments/assets/bd978beb-59ab-4c08-98d3-ed2eae0fe748" />
 
