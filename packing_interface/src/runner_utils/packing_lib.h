@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
+#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -58,6 +60,54 @@ inline std::vector<Rect> sort_by_area(
                           : (a.width * a.height) < (b.width * b.height);
     });
     return items;
+}
+
+inline std::optional<std::pair<double, double>> find_bottom_left_position(
+    const std::vector<std::tuple<double, double, int, int>>& placements,
+    int bin_width,
+    int width,
+    int height,
+    std::optional<double> max_height = std::nullopt
+) {
+    std::vector<double> candidate_xs = {0.0};
+    for (const auto& [px, py, pw, ph] : placements) {
+        (void)py;
+        (void)ph;
+        candidate_xs.push_back(px + pw);
+    }
+
+    std::sort(candidate_xs.begin(), candidate_xs.end());
+    candidate_xs.erase(std::unique(candidate_xs.begin(), candidate_xs.end()), candidate_xs.end());
+
+    std::optional<std::pair<double, double>> best_position;
+    for (double candidate_x : candidate_xs) {
+        if (candidate_x + width > bin_width) {
+            continue;
+        }
+
+        double candidate_y = 0.0;
+        for (const auto& [px, py, pw, ph] : placements) {
+            bool overlaps_x = candidate_x < px + pw && candidate_x + width > px;
+            if (overlaps_x) {
+                candidate_y = std::max(candidate_y, py + ph);
+            }
+        }
+
+        if (max_height.has_value() && candidate_y + height > *max_height) {
+            continue;
+        }
+
+        std::pair<double, double> position = {candidate_y, candidate_x};
+        if (!best_position.has_value() || position < *best_position) {
+            best_position = position;
+        }
+    }
+
+    if (!best_position.has_value()) {
+        return std::nullopt;
+    }
+
+    return std::make_pair(best_position->second, best_position->first);
 }
 
 

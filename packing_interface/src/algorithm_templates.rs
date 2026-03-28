@@ -494,5 +494,15 @@ fn fallback_templates() -> Vec<AlgorithmTemplateEntry> {
             editable: false,
             is_root: false,
         },
+        AlgorithmTemplateEntry {
+            id: "bfdh_python".to_string(),
+            name: "BFDH".to_string(),
+            description: "Best fit decreasing height".to_string(),
+            language: CodeLanguage::Cpp,
+            path: Some("python/root/bfdh.cpp".to_string()),
+            builtin: true,
+            editable: false,
+            is_root: true,
+        },
     ]
 }

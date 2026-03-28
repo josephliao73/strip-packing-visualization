@@ -167,6 +167,36 @@ def place_items_ffdh(items, bin_width, start_y=0.0):
     return placements
 
 
+def find_bottom_left_position(placements, bin_width, width, height, max_height=None):
+    candidate_xs = {0.0}
+    for px, _, pw, _ in placements:
+        candidate_xs.add(px + pw)
+
+    best_position = None
+    for candidate_x in sorted(candidate_xs):
+        if candidate_x + width > bin_width:
+            continue
+
+        candidate_y = 0.0
+        for px, py, pw, ph in placements:
+            overlaps_x = candidate_x < px + pw and candidate_x + width > px
+            if overlaps_x:
+                candidate_y = max(candidate_y, py + ph)
+
+        if max_height is not None and candidate_y + height > max_height:
+            continue
+
+        position = (candidate_y, candidate_x)
+        if best_position is None or position < best_position:
+            best_position = position
+
+    if best_position is None:
+        return None
+
+    y, x = best_position
+    return x, y
+
+
 def nfdh(rectangles, bin_width):
     return place_items_nfdh(expand_items(rectangles), bin_width)
 

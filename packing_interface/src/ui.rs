@@ -114,6 +114,8 @@ impl PackingApp {
                 algorithm_output: None,
                 parent_output: None,
                 repack_output: None,
+                code_output_json: None,
+                code_errors: Vec::new(),
                 output_revision: 0,
                 hit_grid: None,
                 visible_rects: 0,
@@ -149,11 +151,10 @@ impl PackingApp {
             create_template_name_input: String::new(),
             create_template_description_input: String::new(),
             create_template_language: None,
+            create_template_from_current: false,
             template_read_only_hovered: false,
             bottom_panel_visible: true,
             bottom_panel_tab: BottomPanelTab::Output,
-            code_errors: Vec::new(),
-            code_output_json: None,
             settings: Settings {
                 area_select_enabled: true,
                 snap_to_rectangles_enabled: true,
@@ -323,7 +324,7 @@ impl PackingApp {
             }
             Input::AlgorithmTemplateSelected(template) => {
                 if template.is_create_new() {
-                    self.open_create_template_modal();
+                    self.open_create_template_modal(false);
                 } else if self.active_algo_tab().map(|t| !t.selection_regions.iter().any(|r| r.is_inherited)).unwrap_or(true) {
                     self.sync_active_tab_editor_state();
                     let code = self.load_code_for_template(
@@ -347,6 +348,9 @@ impl PackingApp {
             }
             Input::TemplateDescriptionChanged(value) => {
                 self.create_template_description_input = value;
+            }
+            Input::CreateTemplateFromCurrent => {
+                self.open_create_template_modal(true);
             }
             Input::ConfirmCreateTemplate => {
                 self.confirm_create_template();
@@ -945,15 +949,54 @@ impl PackingApp {
 						    tab.last_right_panel_tab = self.active_tab;
 						}
 						self.error_message = Some("✓ Code executed successfully".to_string());
-						self.code_output_json = Some(raw_json);
-						self.code_errors.clear();
+						if let Some(tab) = self.active_algo_tab_mut() {
+                            tab.code_output_json = Some(raw_json);
+                            tab.code_errors.clear();
+                        }
+						self.bottom_panel_tab = BottomPanelTab::Output;
+						self.new_area_select = true;
+					    }
+					    RunResult::SuccessWithWarnings { output: new_output, raw_json, warnings } => {
+						let parent_snapshot = self
+						    .active_algo_tab()
+						    .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
+						let composed_output = parent_snapshot
+						    .as_ref()
+						    .map(|parent| self.compose_repack_output(parent, &new_output, &selected_indices, inherited_region))
+						    .unwrap_or_else(|| new_output.clone());
+
+						if let Some(tab) = self.active_algo_tab_mut() {
+						    tab.repack_output = Some(new_output);
+						    tab.algorithm_output = Some(composed_output);
+						    tab.repacked_indices = selected_indices.clone();
+						    tab.obstacle_spaces = obstacle_spaces.clone();
+						    tab.visible_rects = 0;
+						    tab.animating = true;
+						    tab.output_revision = tab.output_revision.wrapping_add(1);
+						}
+						if self.settings.auto_minimize_height {
+						    self.apply_auto_minimize_height();
+						}
+						self.selected_rects.clear();
+						self.rebuild_hit_grid();
+						self.active_tab = RightPanelTab::Visualization;
+						if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+						    tab.last_right_panel_tab = self.active_tab;
+						}
+						self.error_message = Some("Rendered with intersection warnings".to_string());
+						if let Some(tab) = self.active_algo_tab_mut() {
+                            tab.code_output_json = Some(raw_json);
+                            tab.code_errors = warnings;
+                        }
 						self.bottom_panel_tab = BottomPanelTab::Output;
 						self.new_area_select = true;
 					    }
 					    RunResult::Error { errors } => {
 						self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
-						self.code_errors = errors;
-						self.code_output_json = None;
+						if let Some(tab) = self.active_algo_tab_mut() {
+                            tab.code_errors = errors;
+                            tab.code_output_json = None;
+                        }
 						self.bottom_panel_tab = BottomPanelTab::Output;
 					    }
 					}
@@ -971,7 +1014,7 @@ impl PackingApp {
                 }
             }
             Input::SaveOutputToFile => {
-                if let Some(json) = &self.code_output_json && let Some(path) = rfd::FileDialog::new()
+                if let Some(json) = self.active_algo_tab().and_then(|tab| tab.code_output_json.as_ref()) && let Some(path) = rfd::FileDialog::new()
                     .add_filter("JSON file", &["json"])
                     .set_file_name("algorithm_output.json")
                     .save_file()
@@ -1274,6 +1317,8 @@ impl PackingApp {
                             algorithm_output: parent_output.clone(),
                             parent_output,
                             repack_output: None,
+                            code_output_json: None,
+                            code_errors: Vec::new(),
                             output_revision: parent_revision,
                             hit_grid: None,
                             visible_rects: parent_visible,
@@ -1462,6 +1507,7 @@ fn process_batch_run_step(&mut self) {
         let run_result = run_code_with_testcase(language, &code, &testcase);
         let (height, output) = match run_result {
             RunResult::Success { output, .. } => (Some(output.total_height), Some(output)),
+            RunResult::SuccessWithWarnings { output, .. } => (Some(output.total_height), Some(output)),
             RunResult::Error { .. } => {
                 self.batch_run_failures += 1;
                 (None, None)
@@ -1866,6 +1912,8 @@ fn snap_to_rectangles(
                     tab.obstacle_spaces.clear();
                     tab.visible_rects = 0;
                     tab.animating = true;
+                    tab.code_output_json = Some(raw_json.clone());
+                    tab.code_errors.clear();
                     tab.output_revision = tab.output_revision.wrapping_add(1);
                 }
                 if self.settings.auto_minimize_height {
@@ -1878,8 +1926,35 @@ fn snap_to_rectangles(
                     tab.last_right_panel_tab = self.active_tab;
                 }
                 self.error_message = Some("✓ Code executed successfully".to_string());
-                self.code_output_json = Some(raw_json);
-                self.code_errors.clear();
+                self.bottom_panel_tab = BottomPanelTab::Output;
+                self.new_area_select = true;
+                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                    tab.selection_regions.clear();
+                }
+            }
+            RunResult::SuccessWithWarnings { output, raw_json, warnings } => {
+                if let Some(tab) = self.active_algo_tab_mut() {
+                    tab.algorithm_output = Some(output);
+                    tab.parent_output = None;
+                    tab.repack_output = None;
+                    tab.repacked_indices.clear();
+                    tab.obstacle_spaces.clear();
+                    tab.visible_rects = 0;
+                    tab.animating = true;
+                    tab.code_output_json = Some(raw_json.clone());
+                    tab.code_errors = warnings;
+                    tab.output_revision = tab.output_revision.wrapping_add(1);
+                }
+                if self.settings.auto_minimize_height {
+                    self.apply_auto_minimize_height();
+                }
+                self.selected_rects.clear();
+                self.rebuild_hit_grid();
+                self.active_tab = RightPanelTab::Visualization;
+                if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
+                    tab.last_right_panel_tab = self.active_tab;
+                }
+                self.error_message = Some("Rendered with warnings".to_string());
                 self.bottom_panel_tab = BottomPanelTab::Output;
                 self.new_area_select = true;
                 if let Some(tab) = self.algo_tabs.iter_mut().find(|t| t.id == self.active_algo_tab_id) {
@@ -1888,8 +1963,10 @@ fn snap_to_rectangles(
             }
             RunResult::Error { errors } => {
                 self.error_message = Some(format!("Execution error:\n{}", errors.join("\n")));
-                self.code_errors = errors;
-                self.code_output_json = None;
+                if let Some(tab) = self.active_algo_tab_mut() {
+                    tab.code_errors = errors;
+                    tab.code_output_json = None;
+                }
                 self.bottom_panel_tab = BottomPanelTab::Output;
             }
         }
@@ -2046,12 +2123,22 @@ fn snap_to_rectangles(
         self.cpp_template_options = algorithm_templates::templates_for_language(&self.available_templates, CodeLanguage::Cpp);
     }
 
-    fn open_create_template_modal(&mut self) {
+    fn open_create_template_modal(&mut self, from_current: bool) {
         self.create_template_modal_open = true;
         self.create_template_language = Some(self.selected_language);
-        self.create_template_name_input = match self.selected_language {
-            CodeLanguage::Cpp => "Custom C++".to_string(),
-            _ => "Custom Python".to_string(),
+        self.create_template_from_current = from_current;
+        self.create_template_name_input = if from_current {
+            self.selected_template_for_language(self.selected_language)
+                .map(|template| format!("{} Copy", template.name))
+                .unwrap_or_else(|| match self.selected_language {
+                    CodeLanguage::Cpp => "Custom C++ Copy".to_string(),
+                    _ => "Custom Python Copy".to_string(),
+                })
+        } else {
+            match self.selected_language {
+                CodeLanguage::Cpp => "Custom C++".to_string(),
+                _ => "Custom Python".to_string(),
+            }
         };
         self.create_template_description_input.clear();
         self.template_read_only_hovered = false;
@@ -2062,6 +2149,7 @@ fn snap_to_rectangles(
         self.create_template_name_input.clear();
         self.create_template_description_input.clear();
         self.create_template_language = None;
+        self.create_template_from_current = false;
     }
 
     fn persist_custom_template_code(
@@ -2173,6 +2261,8 @@ fn snap_to_rectangles(
             algorithm_output: output.cloned(),
             parent_output: None,
             repack_output: None,
+            code_output_json: None,
+            code_errors: Vec::new(),
             output_revision: if output.is_some() { 1 } else { 0 },
             hit_grid: None,
             visible_rects: output.map(|o| o.placements.len()).unwrap_or(0),
@@ -2220,6 +2310,8 @@ fn snap_to_rectangles(
             algorithm_output: None,
             parent_output: None,
             repack_output: None,
+            code_output_json: None,
+            code_errors: Vec::new(),
             output_revision: 0,
             hit_grid: None,
             visible_rects: 0,
@@ -2232,6 +2324,9 @@ fn snap_to_rectangles(
 
     fn confirm_create_template(&mut self) {
         let language = self.create_template_language.unwrap_or(self.selected_language);
+        let create_from_current = self.create_template_from_current;
+        let current_code = self.code_editor_content.text();
+
         match algorithm_templates::create_custom_template(
             language,
             &self.create_template_name_input,
@@ -2240,6 +2335,30 @@ fn snap_to_rectangles(
             Ok(template) => {
                 self.available_templates = algorithm_templates::load_root_templates();
                 self.refresh_template_options();
+
+                if create_from_current {
+                    if let Err(error) = algorithm_templates::save_custom_template_code(&template, language, &current_code) {
+                        self.error_message = Some(error);
+                        return;
+                    }
+
+                    self.code_editor_content = text_editor::Content::with_text(&current_code);
+                    self.set_selected_template_for_language(language, Some(template.clone()));
+                    if let Some(tab) = self.active_algo_tab_mut() {
+                        tab.code = current_code.clone();
+                        tab.algorithm_template = Some(template.clone());
+                        tab.set_code_for_language(language, current_code.clone());
+                        tab.set_template_for_language(language, Some(template.clone()));
+                        tab.drafts_for_language_mut(language)
+                            .insert(template.id.clone(), current_code.clone());
+                    }
+
+                    self.close_create_template_modal();
+                    self.active_tab = RightPanelTab::CodeEditor;
+                    self.error_message = Some(format!("Saved template '{}' from the current code.", template.name));
+                    return;
+                }
+
                 let python_template = if language == CodeLanguage::Python {
                     template.clone()
                 } else {
@@ -2285,6 +2404,8 @@ fn snap_to_rectangles(
                     algorithm_output: None,
                     parent_output: None,
                     repack_output: None,
+                    code_output_json: None,
+                    code_errors: Vec::new(),
                     output_revision: 0,
                     hit_grid: None,
                     visible_rects: 0,
@@ -3541,12 +3662,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             };
 
             // ── single case ───────────────────────────────────────────────
-            let import_test_case_button = button(text("Import").size(13).font(ui_font))
-                .on_press(Input::ImportTestCase)
-                .padding([9, 16])
-                .width(Length::Shrink)
-                .style(secondary_btn_style);
-
             let generate_test_case_button = button(text("Generate Random").size(13).font(ui_font))
                 .on_press(Input::GenerateTestCase)
                 .padding([9, 16])
@@ -3710,12 +3825,9 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                         ]
                         .spacing(10),
                         column![].height(10),
-                        row![import_test_case_button, generate_test_case_button]
+                        row![generate_test_case_button]
                             .spacing(8)
                             .align_y(Alignment::Center),
-                        column![].height(12),
-                        single_status,
-                        single_message,
                     ]
                     .spacing(0)
                 )
@@ -3744,6 +3856,35 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
                             batch_button,
                         ]
                         .align_y(Alignment::Center),
+                    ]
+                    .spacing(0)
+                )
+                .padding(16)
+                .width(Length::Fill)
+                .style(section_box_style),
+
+                column![].height(12),
+
+                container(
+                    column![
+                        text("Import Existing Test Case").size(12).font(ui_font)
+                            .style(|_: &Theme| text::Style { color: Some(Color::from_rgb(0.62, 0.65, 0.76)) }),
+                        column![].height(6),
+                        helper_text("Load a saved JSON case into the single-case slot without using the random generator."),
+                        column![].height(12),
+                        row![
+                            button(text("Import Test Case").size(13).font(ui_font))
+                                .on_press(Input::ImportTestCase)
+                                .padding([9, 16])
+                                .width(Length::Shrink)
+                                .style(secondary_btn_style),
+                            column![].width(Length::Fill),
+                            single_status,
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                        column![].height(10),
+                        single_message,
                     ]
                     .spacing(0)
                 )
@@ -4070,8 +4211,8 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             template_read_only_hovered: self.template_read_only_hovered,
             bottom_panel_visible: self.bottom_panel_visible,
             bottom_panel_tab: self.bottom_panel_tab,
-            code_errors: &self.code_errors,
-            code_output_json: self.code_output_json.as_deref(),
+            code_errors: self.active_algo_tab().map(|tab| tab.code_errors.as_slice()).unwrap_or(&[]),
+            code_output_json: self.active_algo_tab().and_then(|tab| tab.code_output_json.as_deref()),
             testcase_message: self.testcase_message.as_deref(),
             multiple_testcase_message: self.multiple_testcase_message.as_deref(),
             testcase: self.current_testcase.as_ref(),
@@ -4181,8 +4322,8 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             .into();
 
         let create_template_overlay: Element<'_, Input> = if self.create_template_modal_open {
-            let title = text("Create Template").size(16).font(ui_font);
-            let subtitle = text("Save a new editable template under algorithm_templates/")
+            let title = text(if self.create_template_from_current { "Branch Template" } else { "Create Template" }).size(16).font(ui_font);
+            let subtitle = text(if self.create_template_from_current { "Save the current code as a new editable template under algorithm_templates/." } else { "Save a new editable template under algorithm_templates/" })
                 .size(11)
                 .style(|_theme: &Theme| text::Style {
                     color: Some(Color::from_rgb(0.62, 0.64, 0.70)),
@@ -4198,7 +4339,7 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             let cancel_button = button(text("Cancel").size(12).font(ui_font))
                 .on_press(Input::CancelCreateTemplate)
                 .padding([8, 14]);
-            let save_button = button(text("Create Template").size(12).font(ui_font))
+            let save_button = button(text(if self.create_template_from_current { "Branch Template" } else { "Create Template" }).size(12).font(ui_font))
                 .on_press(Input::ConfirmCreateTemplate)
                 .padding([8, 14]);
 

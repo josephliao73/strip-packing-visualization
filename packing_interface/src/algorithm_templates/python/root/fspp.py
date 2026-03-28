@@ -1,5 +1,4 @@
 import packing_lib
-import json
 from typing import List, Tuple
 
 class Packing:

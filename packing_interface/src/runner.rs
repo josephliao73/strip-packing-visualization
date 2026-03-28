@@ -7,6 +7,11 @@ pub enum RunResult {
         output: AlgorithmOutput,
         raw_json: String,
     },
+    SuccessWithWarnings {
+        output: AlgorithmOutput,
+        raw_json: String,
+        warnings: Vec<String>,
+    },
     Error {
         errors: Vec<String>,
     },
@@ -370,6 +375,63 @@ fn serialize_rectangles(rectangles: &[Rectangle]) -> Result<String, RunResult> {
     })
 }
 
+fn validate_packing_output(output: &AlgorithmOutput) -> Result<(), Vec<String>> {
+    let mut warnings = Vec::new();
+
+    for (placement_index, placement) in output.placements.iter().enumerate() {
+        let x1 = placement.x.into_inner();
+        let y1 = placement.y.into_inner();
+        let x2 = x1 + placement.width as f32;
+        let y2 = y1 + placement.height as f32;
+
+        if x1 < 0.0 || y1 < 0.0 || x2 > output.bin_width as f32 {
+            warnings.push(format!(
+                "Placement {} is out of bounds: rect=({}, {}, {}, {}), bin_width={}",
+                placement_index,
+                x1,
+                y1,
+                x2,
+                y2,
+                output.bin_width,
+            ));
+        }
+
+        for (other_index, other) in output.placements.iter().enumerate().skip(placement_index + 1) {
+            let ox1 = other.x.into_inner();
+            let oy1 = other.y.into_inner();
+            let ox2 = ox1 + other.width as f32;
+            let oy2 = oy1 + other.height as f32;
+
+            let intersects = x1 < ox2
+                && x2 > ox1
+                && y1 < oy2
+                && y2 > oy1;
+
+            if intersects {
+                warnings.push(format!(
+                    "Placement {} intersects placement {}: rect_a=({}, {}, {}, {}), rect_b=({}, {}, {}, {})",
+                    placement_index,
+                    other_index,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    ox1,
+                    oy1,
+                    ox2,
+                    oy2,
+                ));
+            }
+        }
+    }
+
+    if warnings.is_empty() {
+        Ok(())
+    } else {
+        Err(warnings)
+    }
+}
+
 fn validate_repack_output(output: &AlgorithmOutput, non_empty_space: &[NonEmptySpace]) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -448,11 +510,23 @@ pub fn get_runner(language: CodeLanguage) -> Box<dyn LanguageRunner> {
 }
 
 pub fn run_code(language: CodeLanguage, code: &str, parsed: &ParseOutput) -> RunResult {
-    get_runner(language).run(code, parsed.width, &parsed.rects)
+    match get_runner(language).run(code, parsed.width, &parsed.rects) {
+        RunResult::Success { output, raw_json } => match validate_packing_output(&output) {
+            Ok(()) => RunResult::Success { output, raw_json },
+            Err(warnings) => RunResult::SuccessWithWarnings { output, raw_json, warnings },
+        },
+        other => other,
+    }
 }
 
 pub fn run_code_with_testcase(language: CodeLanguage, code: &str, testcase: &JsonInput) -> RunResult {
-    get_runner(language).run(code, testcase.width_of_bin, &testcase.rectangle_list)
+    match get_runner(language).run(code, testcase.width_of_bin, &testcase.rectangle_list) {
+        RunResult::Success { output, raw_json } => match validate_packing_output(&output) {
+            Ok(()) => RunResult::Success { output, raw_json },
+            Err(warnings) => RunResult::SuccessWithWarnings { output, raw_json, warnings },
+        },
+        other => other,
+    }
 }
 
 pub fn run_repack_code_with_testcase(
@@ -471,7 +545,7 @@ pub fn run_repack_code_with_testcase(
     ) {
         RunResult::Success { output, raw_json } => match validate_repack_output(&output, non_empty_space) {
             Ok(()) => RunResult::Success { output, raw_json },
-            Err(errors) => RunResult::Error { errors },
+            Err(warnings) => RunResult::SuccessWithWarnings { output, raw_json, warnings },
         },
         error => error,
     }

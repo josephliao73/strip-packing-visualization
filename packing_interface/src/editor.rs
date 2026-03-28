@@ -109,6 +109,30 @@ fn build_algorithm_template_selector<'a>(
     .into()
 }
 
+fn build_branch_template_button() -> Element<'static, Input> {
+    button(text("Duplicate").size(11).font(Font::default()))
+        .on_press(Input::CreateTemplateFromCurrent)
+        .padding([6, 12])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.18, 0.18, 0.22),
+                _ => Color::from_rgb(0.14, 0.14, 0.17),
+            };
+
+            button::Style {
+                background: Some(bg.into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.24, 0.24, 0.28),
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                text_color: Color::from_rgb(0.82, 0.82, 0.85),
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
 fn build_save_output_json_button(enabled: bool) -> Element<'static, Input> {
     let ui_font = Font::default();
 
@@ -154,26 +178,45 @@ fn build_save_output_json_button(enabled: bool) -> Element<'static, Input> {
     .into()
 }
 
-fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
-    let mut btn =
-        button(container(text("Run").size(14).font(Font::default())).center_x(Length::Fill));
+fn build_run_action_button(
+    label: &'static str,
+    run_code: Option<i32>,
+    compact: bool,
+    primary: bool,
+) -> Element<'static, Input> {
+    let mut btn = button(
+        container(text(label).size(if compact { 12 } else { 14 }).font(Font::default()))
+            .center_x(Length::Fill)
+    );
 
-    if has_testcase == 1 || has_testcase == 2 {
-        btn = btn.on_press(Input::RunCode(has_testcase));
+    if let Some(run_code) = run_code {
+        btn = btn.on_press(Input::RunCode(run_code));
     }
 
-    btn.padding([10, 30])
+    btn.padding(if compact { [10, 14] } else { [10, 22] })
         .style(move |_theme: &Theme, status| {
-            let (base_bg, hover_bg, text_color) = if has_testcase != 0 {
-                (
-                    Color::from_rgb(0.18, 0.48, 0.28),
-                    Color::from_rgb(0.22, 0.58, 0.34),
-                    Color::from_rgb(0.96, 0.98, 0.96),
-                )
+            let enabled = run_code.is_some();
+            let (base_bg, hover_bg, border, text_color) = if enabled {
+                if primary {
+                    (
+                        Color::from_rgb(0.18, 0.48, 0.28),
+                        Color::from_rgb(0.22, 0.58, 0.34),
+                        Color::from_rgb(0.28, 0.58, 0.38),
+                        Color::from_rgb(0.96, 0.98, 0.96),
+                    )
+                } else {
+                    (
+                        Color::from_rgb(0.15, 0.22, 0.38),
+                        Color::from_rgb(0.20, 0.28, 0.46),
+                        Color::from_rgb(0.30, 0.40, 0.62),
+                        Color::from_rgb(0.82, 0.88, 0.96),
+                    )
+                }
             } else {
                 (
                     Color::from_rgb(0.12, 0.12, 0.15),
                     Color::from_rgb(0.12, 0.12, 0.15),
+                    Color::from_rgb(0.18, 0.18, 0.22),
                     Color::from_rgb(0.38, 0.38, 0.43),
                 )
             };
@@ -183,11 +226,7 @@ fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
                     _ => base_bg.into(),
                 }),
                 border: iced::Border {
-                    color: if has_testcase != 0 {
-                        Color::from_rgb(0.28, 0.58, 0.38)
-                    } else {
-                        Color::from_rgb(0.18, 0.18, 0.22)
-                    },
+                    color: border,
                     width: 1.0,
                     radius: 8.0.into(),
                 },
@@ -196,6 +235,32 @@ fn build_run_button(has_testcase: i32) -> Element<'static, Input> {
             }
         })
         .into()
+}
+
+fn build_run_controls(has_single_testcase: bool, has_multiple_testcases: bool, is_root: bool) -> Element<'static, Input> {
+    if !is_root {
+        return build_run_action_button("Run", Some(1), false, true);
+    }
+
+    if has_single_testcase && has_multiple_testcases {
+        return row![
+            build_run_action_button("Run Single", Some(1), false, true),
+            build_run_action_button("Run Batch", Some(2), true, false),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into();
+    }
+
+    if has_single_testcase {
+        return build_run_action_button("Run Single", Some(1), false, true);
+    }
+
+    if has_multiple_testcases {
+        return build_run_action_button("Run Batch", Some(2), false, false);
+    }
+
+    build_run_action_button("Run", None, false, true)
 }
 
 fn build_code_editor<'a>(
@@ -307,6 +372,40 @@ fn build_output_content<'a>(json: Option<&'a str>, errors: &'a [String]) -> Elem
     let ui_font = Font::default();
 
     if let Some(json) = json {
+        let warnings: Element<'a, Input> = if errors.is_empty() {
+            column![].into()
+        } else {
+            container(
+                column![
+                    text("Layout Warnings")
+                        .size(11)
+                        .font(ui_font)
+                        .style(|_theme: &Theme| text::Style {
+                            color: Some(Color::from_rgb(0.92, 0.72, 0.42)),
+                        }),
+                    text(errors.join("\n"))
+                        .size(11)
+                        .font(Font::MONOSPACE)
+                        .style(|_theme: &Theme| text::Style {
+                            color: Some(Color::from_rgb(0.90, 0.78, 0.58)),
+                        }),
+                ]
+                .spacing(8)
+            )
+            .padding(10)
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(Color::from_rgb(0.11, 0.09, 0.05).into()),
+                border: iced::Border {
+                    color: Color::from_rgb(0.42, 0.30, 0.12),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+        };
+
         column![
             container(
                 row![
@@ -337,6 +436,7 @@ fn build_output_content<'a>(json: Option<&'a str>, errors: &'a [String]) -> Elem
                     ..Default::default()
                 }
             }),
+            warnings,
             scrollable(
                 container(text(json.to_string()).size(11).font(Font::MONOSPACE).style(
                     |_theme: &Theme| {
@@ -903,7 +1003,9 @@ fn build_multi_run_results_content<'a>(
 }
 
 fn build_bottom_panel<'a>(state: &EditorState<'a>) -> Element<'a, Input> {
-    let show_batch_results = !state.multiple_run_results.is_empty();
+    let has_output_content = state.code_output_json.is_some() || !state.code_errors.is_empty();
+    let show_batch_results = matches!(state.bottom_panel_tab, BottomPanelTab::MultipleTestCases)
+        || (!has_output_content && !state.multiple_run_results.is_empty());
     let content: Element<'_, Input> = if show_batch_results {
         build_multi_run_results_content(
             state.multiple_run_results,
@@ -956,16 +1058,11 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
         (false, true) => &[CodeLanguage::Cpp],
         (false, false) => &[],
     };
-    let has_testcase: i32 = if !state.is_root {
-        1
-    } else if state.has_single_testcase {
-        1
-    } else if state.has_multiple_testcases {
-        2
-    } else {
-        0
-    };
-    let run_button = build_run_button(has_testcase);
+    let run_button = build_run_controls(
+        state.has_single_testcase,
+        state.has_multiple_testcases,
+        state.is_root,
+    );
     let code_editor = build_code_editor(
         state.code_editor_content,
         state.selected_language,
@@ -1008,6 +1105,7 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
             "Select a template from algorithm_templates/manifest.json.".to_string()
         });
 
+        let branch_button = build_branch_template_button();
         let lock_icon: Element<'_, Input> = if state.selected_algorithm_is_read_only {
             text("⊘")
                 .size(12)
@@ -1022,6 +1120,7 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
                 row![
                     text("Template").size(11),
                     template_selector,
+                    branch_button,
                     lock_icon,
                 ]
                 .spacing(8)

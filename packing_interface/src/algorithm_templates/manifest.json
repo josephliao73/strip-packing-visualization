@@ -50,11 +50,71 @@
     "is_root": true
   },
   {
+    "id": "bfdh_python",
+    "name": "BFDH",
+    "description": "Best-Fit Decreasing Height strip packing.",
+    "language": "Python",
+    "path": "python/root/bfdh.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bl_python",
+    "name": "BL",
+    "description": "Bottom-Left strip packing ordered by non-increasing width.",
+    "language": "Python",
+    "path": "python/root/bl.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
     "id": "ffdh_cpp",
     "name": "FFDH",
     "description": "First-Fit Decreasing Height strip packing.",
     "language": "Cpp",
     "path": "cpp/root/ffdh.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bfdh_cpp",
+    "name": "BFDH",
+    "description": "Best-Fit Decreasing Height strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/bfdh.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bl_cpp",
+    "name": "BL",
+    "description": "Bottom-Left strip packing ordered by non-increasing width.",
+    "language": "Cpp",
+    "path": "cpp/root/bl.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "ud_cpp",
+    "name": "UD",
+    "description": "Baker's Up-Down strip packing with BL-style regions and a small-item shelf fallback.",
+    "language": "Cpp",
+    "path": "cpp/root/ud.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "sleator_cpp",
+    "name": "Sleator",
+    "description": "Sleator's 2.5-approximation strip-packing heuristic.",
+    "language": "Cpp",
+    "path": "cpp/root/sleator.cpp",
     "builtin": true,
     "editable": false,
     "is_root": true
@@ -80,6 +140,26 @@
     "is_root": true
   },
   {
+    "id": "ud_python",
+    "name": "UD",
+    "description": "Baker's Up-Down strip packing with BL-style regions and a small-item shelf fallback.",
+    "language": "Python",
+    "path": "python/root/ud.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "sleator_python",
+    "name": "Sleator",
+    "description": "Sleator's 2.5-approximation strip-packing heuristic.",
+    "language": "Python",
+    "path": "python/root/sleator.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
     "id": "default_node_python",
     "name": "Default Node",
     "description": "Default Python repacking template.",
@@ -98,5 +178,15 @@
     "builtin": true,
     "editable": false,
     "is_root": false
+  },
+  {
+    "id": "custom_python_bad_1",
+    "name": "bad",
+    "description": "123",
+    "language": "Python",
+    "path": "python/root/custom_python_bad_1.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
   }
 ]
