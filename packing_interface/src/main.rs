@@ -22,7 +22,6 @@ fn main() -> iced::Result {
             if !lang_map[&temp_str] {
             lang_map.insert(temp_str, true);
             } else {
-                println!("Repeated argument!");
                 break;
             }
         } else {

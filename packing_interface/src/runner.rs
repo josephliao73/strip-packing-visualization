@@ -256,7 +256,7 @@ int main(int argc, char* argv[]) {
     }
 
     fn repack_preamble() -> &'static str {
-        "struct Obstacle { double x1, x2, y1, y2; };\n"
+        "#ifndef PACKING_OBSTACLE_DEFINED\n#define PACKING_OBSTACLE_DEFINED\nnamespace packing { struct Obstacle { double x1, x2, y1, y2; }; }\nusing packing::Obstacle;\n#endif\n"
     }
 
     fn runner_utils_dir() -> PathBuf {

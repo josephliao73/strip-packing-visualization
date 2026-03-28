@@ -279,3 +279,110 @@ def place_strip_band(type_keys, counts, strip_height, remaining_quantities, star
             x_cursor += width
 
     return placements, band_height
+
+
+def normalize_obstacles(non_empty_space):
+    return [
+        {
+            "x_1": float(obstacle["x_1"] if isinstance(obstacle, dict) else obstacle.x_1),
+            "x_2": float(obstacle["x_2"] if isinstance(obstacle, dict) else obstacle.x_2),
+            "y_1": float(obstacle["y_1"] if isinstance(obstacle, dict) else obstacle.y_1),
+            "y_2": float(obstacle["y_2"] if isinstance(obstacle, dict) else obstacle.y_2),
+        }
+        for obstacle in non_empty_space
+    ]
+
+
+def placement_to_blocker(placement):
+    x, y, width, height = placement
+    return {
+        "x_1": float(x),
+        "x_2": float(x + width),
+        "y_1": float(y),
+        "y_2": float(y + height),
+    }
+
+
+def append_placement_as_blocker(blockers, placement):
+    blockers.append(placement_to_blocker(placement))
+
+
+def rectangles_intersect(a, b):
+    return (
+        a["x_1"] < b["x_2"]
+        and a["x_2"] > b["x_1"]
+        and a["y_1"] < b["y_2"]
+        and a["y_2"] > b["y_1"]
+    )
+
+
+def can_place_in_region(x, y, width, height, bin_width, bin_height, blockers):
+    if x < 0 or y < 0:
+        return False
+    if x + width > bin_width or y + height > bin_height:
+        return False
+
+    candidate = {
+        "x_1": float(x),
+        "x_2": float(x + width),
+        "y_1": float(y),
+        "y_2": float(y + height),
+    }
+    return all(not rectangles_intersect(candidate, blocker) for blocker in blockers)
+
+
+def candidate_x_positions_for_band(blockers, y, band_height):
+    positions = {0.0}
+    top = y + band_height
+    for blocker in blockers:
+        if y < blocker["y_2"] and top > blocker["y_1"]:
+            positions.add(max(0.0, blocker["x_1"]))
+            positions.add(max(0.0, blocker["x_2"]))
+    return sorted(positions)
+
+
+def leftmost_feasible_x_for_band(blockers, band_y, band_height, width, bin_width, bin_height):
+    for candidate_x in candidate_x_positions_for_band(blockers, band_y, band_height):
+        x = int(candidate_x)
+        if can_place_in_region(x, band_y, width, band_height, bin_width, bin_height, blockers):
+            return x
+    return None
+
+
+def next_level_y(blockers, start_y, level_height, bin_width, bin_height):
+    candidates = {float(max(0.0, start_y))}
+    for blocker in blockers:
+        if blocker["y_2"] >= start_y:
+            candidates.add(float(blocker["y_2"]))
+
+    for candidate_y in sorted(candidates):
+        y = int(candidate_y)
+        if y + level_height > bin_height:
+            continue
+        if leftmost_feasible_x_for_band(blockers, y, level_height, 1, bin_width, bin_height) is not None:
+            return y
+    return None
+
+
+def find_bottom_left_position_with_obstacles(blockers, bin_width, bin_height, width, height):
+    candidate_ys = {0.0}
+    for blocker in blockers:
+        candidate_ys.add(float(blocker["y_2"]))
+
+    best_position = None
+    for candidate_y in sorted(candidate_ys):
+        y = int(candidate_y)
+        if y + height > bin_height:
+            continue
+        x = leftmost_feasible_x_for_band(blockers, y, height, width, bin_width, bin_height)
+        if x is None:
+            continue
+        position = (y, x)
+        if best_position is None or position < best_position:
+            best_position = position
+
+    if best_position is None:
+        return None
+
+    y, x = best_position
+    return x, y

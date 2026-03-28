@@ -160,21 +160,21 @@
     "is_root": true
   },
   {
-    "id": "default_node_python",
-    "name": "Default Node",
-    "description": "Default Python repacking template.",
+    "id": "blank_node_python",
+    "name": "Blank Node",
+    "description": "Minimal starter repacking template.",
     "language": "Python",
-    "path": "python/node/default.py",
+    "path": "python/node/blank.py",
     "builtin": true,
     "editable": false,
     "is_root": false
   },
   {
-    "id": "default_node_cpp",
-    "name": "Default Node",
-    "description": "Default C++ repacking template.",
+    "id": "blank_node_cpp",
+    "name": "Blank Node",
+    "description": "Minimal starter repacking template.",
     "language": "Cpp",
-    "path": "cpp/node/default.cpp",
+    "path": "cpp/node/blank.cpp",
     "builtin": true,
     "editable": false,
     "is_root": false
@@ -200,13 +200,53 @@
     "is_root": true
   },
   {
-    "id": "custom_python_bad_1",
-    "name": "bad",
-    "description": "123",
+    "id": "custom_python_nfdh_copy_sdf_1",
+    "name": "NFDH Copy sdf",
+    "description": "s",
     "language": "Python",
-    "path": "python/root/custom_python_bad_1.py",
+    "path": "python/root/custom_python_nfdh_copy_sdf_1.py",
     "builtin": false,
     "editable": true,
     "is_root": true
+  },
+  {
+    "id": "custom_python_nfdh_copy_as_1",
+    "name": "NFDH Copy as",
+    "description": "asd",
+    "language": "Python",
+    "path": "python/root/custom_python_nfdh_copy_as_1.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
+  },
+  {
+    "id": "custom_python_nfdh_copy_sdf_2",
+    "name": "NFDH Copy sdf",
+    "description": "asd",
+    "language": "Python",
+    "path": "python/node/custom_python_nfdh_copy_sdf_2.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": false
+  },
+  {
+    "id": "custom_cpp_blank_copyd_1",
+    "name": "Blank Copyd",
+    "description": "sdf",
+    "language": "Cpp",
+    "path": "cpp/root/custom_cpp_blank_copyd_1.cpp",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
+  },
+  {
+    "id": "custom_cpp_blank_node_copy_1",
+    "name": "Blank Node Copy",
+    "description": "sdfsdf",
+    "language": "Cpp",
+    "path": "cpp/node/custom_cpp_blank_node_copy_1.cpp",
+    "builtin": false,
+    "editable": true,
+    "is_root": false
   }
 ]

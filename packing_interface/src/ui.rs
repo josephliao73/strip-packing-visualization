@@ -57,7 +57,7 @@ impl PackingApp {
 
     pub fn default(lang_map: HashMap<String, bool>) -> Self {
         let initial_language = Self::preferred_language_from_map(&lang_map);
-        let available_templates = algorithm_templates::load_root_templates();
+        let available_templates = algorithm_templates::load_all_templates();
         let python_template_options = algorithm_templates::templates_for_language(&available_templates, CodeLanguage::Python);
         let cpp_template_options = algorithm_templates::templates_for_language(&available_templates, CodeLanguage::Cpp);
         let default_python_template =
@@ -320,14 +320,21 @@ impl PackingApp {
             Input::AlgorithmTemplateSelected(template) => {
                 if template.is_create_new() {
                     self.open_create_template_modal(false);
-                } else if self.active_algo_tab().map(|t| !t.selection_regions.iter().any(|r| r.is_inherited)).unwrap_or(true) {
+                } else {
                     self.sync_active_tab_editor_state();
-                    let code = self.load_code_for_template(
-                        self.active_algo_tab(),
-                        self.selected_language,
-                        Some(template.clone()),
-                    );
                     let language = self.normalize_language(self.selected_language);
+                    let is_node = self.active_algo_tab()
+                        .map(|t| t.selection_regions.iter().any(|r| r.is_inherited))
+                        .unwrap_or(false);
+                    let code = if is_node {
+                        algorithm_templates::load_node_template_code(Some(&template), language)
+                    } else {
+                        self.load_code_for_template(
+                            self.active_algo_tab(),
+                            language,
+                            Some(template.clone()),
+                        )
+                    };
                     self.code_editor_content = text_editor::Content::with_text(&code);
                     self.set_selected_template_for_language(language, Some(template.clone()));
                     if let Some(tab) = self.active_algo_tab_mut() {
@@ -657,7 +664,9 @@ impl PackingApp {
             Input::CodeEditorAction(action) => {
                 use iced::widget::text_editor::{Action, Edit};
 
-                let is_read_only = self.selected_template_for_language(self.selected_language)
+                let is_read_only = self.active_algo_tab()
+                    .and_then(|tab| tab.template_for_language(self.selected_language))
+                    .or_else(|| self.selected_template_for_language(self.selected_language))
                     .map(|template| template.is_read_only())
                     .unwrap_or(false);
                 if is_read_only {
@@ -684,7 +693,10 @@ impl PackingApp {
                         Action::Scroll { lines } => {
                             self.code_editor_content.perform(Action::Scroll { lines });
                         }
-                        Action::Move(_) | Action::Edit(_) => {}
+                        Action::Move(motion) => {
+                            self.code_editor_content.perform(Action::Move(motion));
+                        }
+                        Action::Edit(_) => {}
                     }
                     return;
                 }
@@ -760,21 +772,17 @@ impl PackingApp {
                 let is_node = self.active_algo_tab()
                     .map(|tab| tab.selection_regions.iter().any(|r| r.is_inherited))
                     .unwrap_or(false);
-                let template = if is_node {
-                    None
-                } else {
-                    self.active_algo_tab()
-                        .and_then(|tab| tab.template_for_language(lang))
-                        .or_else(|| self.selected_template_for_language(lang))
-                        .or_else(|| {
-                            self.available_templates
-                                .iter()
-                                .find(|template| template.supports_language(lang))
-                                .cloned()
-                        })
-                };
+                let template = self.active_algo_tab()
+                    .and_then(|tab| tab.template_for_language(lang))
+                    .or_else(|| self.selected_template_for_language(lang))
+                    .or_else(|| {
+                        self.available_templates
+                            .iter()
+                            .find(|template| template.is_root && template.supports_language(lang))
+                            .cloned()
+                    });
                 let code = if is_node {
-                    algorithm_templates::default_node_code(lang).to_string()
+                    algorithm_templates::load_node_template_code(template.as_ref(), lang)
                 } else {
                     self.load_code_for_template(self.active_algo_tab(), lang, template.clone())
                 };
@@ -806,44 +814,16 @@ impl PackingApp {
 			    if let Some(inherited_region) = tab.selection_regions.iter().find(|r| r.is_inherited) {
 				if let Some(output) = tab.parent_output.as_ref().or(tab.algorithm_output.as_ref()) {
 				    let (selected_indices, non_selected_indices) = self.split_region_rectangles(output, inherited_region);
-				    eprintln!(
-					"Repack region: x={} y={} w={} h={} selected={} non_selected={}",
-					inherited_region.bin_x,
-					inherited_region.bin_y,
-					inherited_region.bin_w,
-					inherited_region.bin_h,
-					selected_indices.len(),
-					non_selected_indices.len()
-				    );
-				    eprintln!("Selected indices: {:?}", selected_indices);
-				    eprintln!("Non-selected indices: {:?}", non_selected_indices);
-
 				    let mut rectangles: Vec<Rectangle> = Vec::new();
 				    for &idx in &selected_indices {
 					let p = &output.placements[idx];
 					rectangles.push(Rectangle { width: p.width, height: p.height, quantity: 1 });
-					eprintln!(
-					    "Selected rect idx {} -> x={} y={} w={} h={}",
-					    idx,
-					    p.x.into_inner(),
-					    p.y.into_inner(),
-					    p.width,
-					    p.height
-					);
 				    }
 
 				    let mut non_empty_space: Vec<NonEmptySpace> = Vec::new();
 				    let mut obstacle_spaces: Vec<NonEmptySpace> = Vec::new();
 				    for &idx in &non_selected_indices {
 					let p = &output.placements[idx];
-					eprintln!(
-					    "Obstacle rect idx {} -> x={} y={} w={} h={}",
-					    idx,
-					    p.x.into_inner(),
-					    p.y.into_inner(),
-					    p.width,
-					    p.height
-					);
 					let rect_x1 = p.x.into_inner();
 					let rect_y1 = p.y.into_inner();
 					let rect_x2 = rect_x1 + p.width as f32;
@@ -866,7 +846,6 @@ impl PackingApp {
 						x_2: inter_x2 - region_x1,
 						y_2: inter_y2 - region_y1,
 					    };
-					    eprintln!("Obstacle region-local idx {} -> {:?}", idx, space);
 					    non_empty_space.push(space);
 					    obstacle_spaces.push(NonEmptySpace {
 						x_1: inter_x1,
@@ -897,22 +876,6 @@ impl PackingApp {
 
 					match result {
 					    RunResult::Success { output: new_output, raw_json } => {
-						eprintln!(
-						    "Repack output: bin_width={} total_height={} placements={}",
-						    new_output.bin_width,
-						    new_output.total_height,
-						    new_output.placements.len()
-						);
-						for (i, p) in new_output.placements.iter().enumerate() {
-						    eprintln!(
-							"Repacked rect {} -> x={} y={} w={} h={}",
-							i,
-							p.x.into_inner(),
-							p.y.into_inner(),
-							p.width,
-							p.height
-						    );
-						}
 						let parent_snapshot = self
 						    .active_algo_tab()
 						    .and_then(|tab| tab.parent_output.clone().or_else(|| tab.algorithm_output.clone()));
@@ -992,7 +955,14 @@ impl PackingApp {
 					    }
 					}
 				    } else {
-					self.error_message = Some("Select at least one rectangle to repack.".to_string());
+					let message = "No rectangles are selected for repacking. Use right click on rectangles to select them, then run the node algorithm again.".to_string();
+				self.error_message = Some(message.clone());
+				if let Some(tab) = self.active_algo_tab_mut() {
+                            tab.code_output_json = None;
+                            tab.code_errors = vec![message];
+                        }
+				self.bottom_panel_tab = BottomPanelTab::Output;
+				self.active_tab = RightPanelTab::CodeEditor;
 				    }
 				}
 			    } else {
@@ -1265,7 +1235,10 @@ impl PackingApp {
                         .count();
 
                     let new_name = format!("{}{}", prefix, child_count + 1);
-                        let new_code: String = algorithm_templates::default_node_code(self.selected_language).to_string();
+                        let selected_python_template = Some(algorithm_templates::default_node_template_for_language(&self.available_templates, CodeLanguage::Python));
+                        let selected_cpp_template = Some(algorithm_templates::default_node_template_for_language(&self.available_templates, CodeLanguage::Cpp));
+                        let current_template = Some(algorithm_templates::default_node_template_for_language(&self.available_templates, self.selected_language));
+                        let new_code: String = algorithm_templates::load_node_template_code(current_template.as_ref(), self.selected_language);
 
                         self.algo_tabs[tab_idx].code = new_code.clone(); 
 
@@ -1295,11 +1268,11 @@ impl PackingApp {
                             selection_regions: vec![inherited_region],
                             code: new_code.clone(),
                             language: self.selected_language,
-                            algorithm_template: None,
-                            python_code: algorithm_templates::default_node_code(CodeLanguage::Python).to_string(),
-                            cpp_code: algorithm_templates::default_node_code(CodeLanguage::Cpp).to_string(),
-                            python_template: None,
-                            cpp_template: None,
+                            algorithm_template: current_template.clone(),
+                            python_code: algorithm_templates::load_node_template_code(selected_python_template.as_ref(), CodeLanguage::Python),
+                            cpp_code: algorithm_templates::load_node_template_code(selected_cpp_template.as_ref(), CodeLanguage::Cpp),
+                            python_template: selected_python_template.clone(),
+                            cpp_template: selected_cpp_template.clone(),
                             python_drafts: std::collections::HashMap::new(),
                             cpp_drafts: std::collections::HashMap::new(),
                             last_right_panel_tab: RightPanelTab::Visualization,
@@ -1797,8 +1770,6 @@ fn snap_to_rectangles(
             best = (final_x, yc);
         }
     }
-    println!("{:?}", best);
-
     best
 }
 
@@ -2107,8 +2078,20 @@ fn snap_to_rectangles(
     }
 
     fn refresh_template_options(&mut self) {
-        self.python_template_options = algorithm_templates::templates_for_language(&self.available_templates, CodeLanguage::Python);
-        self.cpp_template_options = algorithm_templates::templates_for_language(&self.available_templates, CodeLanguage::Cpp);
+        let is_root = self.active_algo_tab()
+            .map(|tab| !tab.selection_regions.iter().any(|r| r.is_inherited))
+            .unwrap_or(true);
+
+        self.python_template_options = if is_root {
+            algorithm_templates::templates_for_language(&self.available_templates, CodeLanguage::Python)
+        } else {
+            algorithm_templates::node_templates_for_language(&self.available_templates, CodeLanguage::Python)
+        };
+        self.cpp_template_options = if is_root {
+            algorithm_templates::templates_for_language(&self.available_templates, CodeLanguage::Cpp)
+        } else {
+            algorithm_templates::node_templates_for_language(&self.available_templates, CodeLanguage::Cpp)
+        };
     }
 
     fn open_create_template_modal(&mut self, from_current: bool) {
@@ -2313,14 +2296,18 @@ fn snap_to_rectangles(
         let language = self.create_template_language.unwrap_or(self.selected_language);
         let create_from_current = self.create_template_from_current;
         let current_code = self.code_editor_content.text();
+        let is_root = self.active_algo_tab()
+            .map(|tab| !tab.selection_regions.iter().any(|r| r.is_inherited))
+            .unwrap_or(true);
 
         match algorithm_templates::create_custom_template(
             language,
             &self.create_template_name_input,
             &self.create_template_description_input,
+            is_root,
         ) {
             Ok(template) => {
-                self.available_templates = algorithm_templates::load_root_templates();
+                self.available_templates = algorithm_templates::load_all_templates();
                 self.refresh_template_options();
 
                 if create_from_current {
@@ -2357,12 +2344,12 @@ fn snap_to_rectangles(
                     algorithm_templates::default_root_template_for_language(&self.available_templates, CodeLanguage::Cpp)
                 };
                 let python_code = if language == CodeLanguage::Python {
-                    algorithm_templates::custom_template_starter(CodeLanguage::Python)
+                    algorithm_templates::custom_template_starter(CodeLanguage::Python, true)
                 } else {
                     self.load_code_for_template(None, CodeLanguage::Python, Some(python_template.clone()))
                 };
                 let cpp_code = if language == CodeLanguage::Cpp {
-                    algorithm_templates::custom_template_starter(CodeLanguage::Cpp)
+                    algorithm_templates::custom_template_starter(CodeLanguage::Cpp, true)
                 } else {
                     self.load_code_for_template(None, CodeLanguage::Cpp, Some(cpp_template.clone()))
                 };
@@ -2445,6 +2432,7 @@ fn snap_to_rectangles(
             self.set_selected_template_for_language(CodeLanguage::Python, python_template);
             self.set_selected_template_for_language(CodeLanguage::Cpp, cpp_template);
             self.active_tab = last_right_panel_tab;
+            self.refresh_template_options();
             self.selected_rects.clear();
             for idx in selected_indices {
                 self.selected_rects.insert(idx);
@@ -4205,9 +4193,8 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,
-            show_algorithm_templates: self.language_enabled(current_language) && matches!(current_language, CodeLanguage::Python | CodeLanguage::Cpp) && self.active_algo_tab()
-                .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
-                .unwrap_or(true),
+            show_algorithm_templates: self.language_enabled(current_language)
+                && matches!(current_language, CodeLanguage::Python | CodeLanguage::Cpp),
             batch_run_in_progress: self.batch_run_in_progress,
             batch_run_completed: self.batch_run_completed,
             batch_run_total: self.batch_run_total,

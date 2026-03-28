@@ -54,6 +54,10 @@ impl std::fmt::Display for AlgorithmTemplateEntry {
     }
 }
 
+pub fn load_all_templates() -> Vec<AlgorithmTemplateEntry> {
+    load_templates()
+}
+
 pub fn load_root_templates() -> Vec<AlgorithmTemplateEntry> {
     load_templates()
         .into_iter()
@@ -76,6 +80,52 @@ pub fn templates_for_language(
     }
 
     filtered
+}
+
+pub fn node_templates_for_language(
+    templates: &[AlgorithmTemplateEntry],
+    language: CodeLanguage,
+) -> Vec<AlgorithmTemplateEntry> {
+    let mut filtered: Vec<_> = templates
+        .iter()
+        .filter(|template| !template.is_root && template.supports_language(language))
+        .cloned()
+        .collect();
+
+    filtered.extend(
+        templates
+            .iter()
+            .filter(|template| {
+                template.is_root
+                    && template.supports_language(language)
+                    && !template.name.eq_ignore_ascii_case("Blank")
+                    && has_node_template_equivalent(template, language)
+            })
+            .cloned(),
+    );
+
+    filtered
+}
+
+pub fn default_node_template_for_language(
+    templates: &[AlgorithmTemplateEntry],
+    language: CodeLanguage,
+) -> AlgorithmTemplateEntry {
+    templates
+        .iter()
+        .find(|template| {
+            !template.is_root
+                && template.supports_language(language)
+                && template.name.eq_ignore_ascii_case("Blank Node")
+        })
+        .cloned()
+        .or_else(|| {
+            templates
+                .iter()
+                .find(|template| !template.is_root && template.supports_language(language))
+                .cloned()
+        })
+        .unwrap_or_else(|| fallback_templates().into_iter().find(|template| !template.is_root && template.supports_language(language)).unwrap())
 }
 
 pub fn default_root_template_for_language(
@@ -133,41 +183,110 @@ pub fn default_root_code(language: CodeLanguage) -> String {
     load_root_template_code(&template, language).unwrap_or_default()
 }
 
-pub fn custom_template_starter(language: CodeLanguage) -> String {
-    match language {
-        CodeLanguage::Python => {
-            [
-                "import packing_lib",
-                "from typing import List, Tuple",
-                "",
-                "class Packing:",
-                "    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:",
-                "        placements = []",
-                "        return packing_lib.output_from_placements(bin_width, placements)",
-                "",
-            ]
-            .join("\n")
-        }
-        CodeLanguage::Cpp => {
-            [
-                "#include \"packing_lib.h\"",
-                "using namespace packing;",
-                "",
-                "class Packing {",
-                "public:",
-                "    std::vector<std::tuple<double, double, int, int>> solve(",
-                "        int binWidth,",
-                "        const std::vector<std::tuple<int, int, int>>& rectangles",
-                "    ) {",
-                "        std::vector<std::tuple<double, double, int, int>> placements;",
-                "        return placements;",
-                "    }",
-                "};",
-                "",
-            ]
-            .join("\n")
-        }
-        CodeLanguage::Java => String::new(),
+
+pub fn has_node_template_equivalent(
+    template: &AlgorithmTemplateEntry,
+    language: CodeLanguage,
+) -> bool {
+    let Some(relative_path) = template.path_for_language(language) else {
+        return false;
+    };
+
+    let node_relative_path = if relative_path.contains("/root/") {
+        relative_path.replace("/root/", "/node/")
+    } else {
+        relative_path.to_string()
+    };
+    template_dir().join(node_relative_path).exists()
+}
+
+pub fn load_node_template_code(
+    template: Option<&AlgorithmTemplateEntry>,
+    language: CodeLanguage,
+) -> String {
+    let fallback = || default_node_code(language).to_string();
+
+    let Some(template) = template else {
+        return fallback();
+    };
+
+    let Some(relative_path) = template.path_for_language(language) else {
+        return fallback();
+    };
+
+    let node_relative_path = if relative_path.contains("/root/") {
+        relative_path.replace("/root/", "/node/")
+    } else {
+        relative_path.to_string()
+    };
+    let full_path = template_dir().join(&node_relative_path);
+    fs::read_to_string(&full_path).unwrap_or_else(|_| fallback())
+}
+
+pub fn custom_template_starter(language: CodeLanguage, is_root: bool) -> String {
+    match (language, is_root) {
+        (CodeLanguage::Python, true) => [
+            "import packing_lib",
+            "from typing import List, Tuple",
+            "",
+            "class Packing:",
+            "    def solve(self, bin_width: int, rectangles: List[Tuple[int, int, int]]) -> List[Tuple[float, float, int, int]]:",
+            "        placements = []",
+            "        return packing_lib.output_from_placements(bin_width, placements)",
+            "",
+        ]
+        .join("\n"),
+        (CodeLanguage::Python, false) => [
+            "import packing_lib",
+            "",
+            "class Repacking:",
+            "    def solve(self, bin_height, bin_width, rectangles, non_empty_space):",
+            "        placements = []",
+            "        return packing_lib.output_from_placements(bin_width, placements)",
+            "",
+        ]
+        .join("\n"),
+        (CodeLanguage::Cpp, true) => [
+            "#include \"packing_lib.h\"",
+            "using namespace packing;",
+            "",
+            "class Packing {",
+            "public:",
+            "    std::vector<std::tuple<double, double, int, int>> solve(",
+            "        int binWidth,",
+            "        const std::vector<std::tuple<int, int, int>>& rectangles",
+            "    ) {",
+            "        std::vector<std::tuple<double, double, int, int>> placements;",
+            "        return placements;",
+            "    }",
+            "};",
+            "",
+        ]
+        .join("\n"),
+        (CodeLanguage::Cpp, false) => [
+            "#include \"packing_lib.h\"",
+            "using namespace packing;",
+            "",
+            "class Repacking {",
+            "public:",
+            "    std::vector<std::tuple<double, double, int, int>> solve(",
+            "        int binHeight,",
+            "        int binWidth,",
+            "        const std::vector<std::tuple<int, int, int>>& rectangles,",
+            "        const std::vector<Obstacle>& obstacles",
+            "    ) {",
+            "        (void)binHeight;",
+            "        (void)binWidth;",
+            "        (void)rectangles;",
+            "        (void)obstacles;",
+            "        std::vector<std::tuple<double, double, int, int>> placements;",
+            "        return placements;",
+            "    }",
+            "};",
+            "",
+        ]
+        .join("\n"),
+        (CodeLanguage::Java, _) => String::new(),
     }
 }
 
@@ -175,6 +294,7 @@ pub fn create_custom_template(
     language: CodeLanguage,
     display_name: &str,
     description: &str,
+    is_root: bool,
 ) -> Result<AlgorithmTemplateEntry, String> {
     if !matches!(language, CodeLanguage::Python | CodeLanguage::Cpp) {
         return Err("Custom templates are only supported for Python and C++.".to_string());
@@ -187,15 +307,15 @@ pub fn create_custom_template(
 
     let mut templates = load_templates();
     if templates.iter().any(|template| {
-        template.is_root
+        template.is_root == is_root
             && template.language == language
             && template.name.eq_ignore_ascii_case(display_name)
     }) {
         return Err(format!("A template named '{}' already exists.", display_name));
     }
 
-    let template = build_custom_template_entry(&templates, language, display_name, description.trim());
-    let code = custom_template_starter(language);
+    let template = build_custom_template_entry(&templates, language, display_name, description.trim(), is_root);
+    let code = custom_template_starter(language, is_root);
 
     let relative_path = template
         .path_for_language(language)
@@ -238,8 +358,8 @@ pub fn save_custom_template_code(
 
 pub fn default_node_code(language: CodeLanguage) -> &'static str {
     match language {
-        CodeLanguage::Cpp => include_str!("algorithm_templates/cpp/node/default.cpp"),
-        _ => include_str!("algorithm_templates/python/node/default.py"),
+        CodeLanguage::Cpp => include_str!("algorithm_templates/cpp/node/blank.cpp"),
+        _ => include_str!("algorithm_templates/python/node/blank.py"),
     }
 }
 
@@ -263,6 +383,7 @@ fn build_custom_template_entry(
     language: CodeLanguage,
     display_name: &str,
     description: &str,
+    is_root: bool,
 ) -> AlgorithmTemplateEntry {
     let prefix = match language {
         CodeLanguage::Python => "custom_python_",
@@ -285,8 +406,9 @@ fn build_custom_template_entry(
         }
 
         let relative_path = format!(
-            "{}/root/{}.{}",
+            "{}/{}/{}.{}",
             language_dir(language),
+            if is_root { "root" } else { "node" },
             id,
             extension
         );
@@ -294,7 +416,7 @@ fn build_custom_template_entry(
             id,
             name: display_name.to_string(),
             description: if description.is_empty() {
-                format!("Editable custom {} template.", language_label(language))
+                format!("Editable custom {} {} template.", language_label(language), if is_root { "root" } else { "node" })
             } else {
                 description.to_string()
             },
@@ -302,7 +424,7 @@ fn build_custom_template_entry(
             path: Some(relative_path),
             builtin: false,
             editable: true,
-            is_root: true,
+            is_root,
         };
     }
 }
@@ -475,21 +597,21 @@ fn fallback_templates() -> Vec<AlgorithmTemplateEntry> {
             is_root: true,
         },
         AlgorithmTemplateEntry {
-            id: "default_node_python".to_string(),
-            name: "Default Node".to_string(),
-            description: "Default Python repacking template.".to_string(),
+            id: "blank_node_python".to_string(),
+            name: "Blank Node".to_string(),
+            description: "Minimal starter repacking template.".to_string(),
             language: CodeLanguage::Python,
-            path: Some("python/node/default.py".to_string()),
+            path: Some("python/node/blank.py".to_string()),
             builtin: true,
             editable: false,
             is_root: false,
         },
         AlgorithmTemplateEntry {
-            id: "default_node_cpp".to_string(),
-            name: "Default Node".to_string(),
-            description: "Default C++ repacking template.".to_string(),
+            id: "blank_node_cpp".to_string(),
+            name: "Blank Node".to_string(),
+            description: "Minimal starter repacking template.".to_string(),
             language: CodeLanguage::Cpp,
-            path: Some("cpp/node/default.cpp".to_string()),
+            path: Some("cpp/node/blank.cpp".to_string()),
             builtin: true,
             editable: false,
             is_root: false,
