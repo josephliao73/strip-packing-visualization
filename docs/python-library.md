@@ -32,7 +32,7 @@ Used for strip packing (unbounded height). The solver calls this at the root nod
 
 Parameters:
 - `bin_width: int`
-- `rectangles: list[tuple[int, int, int]]` — each entry is `(width, height, quantity)`
+- `rectangles: list[tuple[int, int, int]]`, each entry is `(width, height, quantity)`
 
 Return value: a JSON string produced by `packing_lib.make_output(...)` or `packing_lib.output_from_placements(...)`
 
@@ -43,8 +43,8 @@ Used for repacking into a fixed-size bin that already has occupied regions. The 
 Parameters:
 - `bin_height: int`
 - `bin_width: int`
-- `rectangles: list[tuple[int, int, int]]` — each entry is `(width, height, quantity)`
-- `non_empty_space: list[dict]` — each entry is a blocked region with keys `x_1`, `x_2`, `y_1`, `y_2`
+- `rectangles: list[tuple[int, int, int]]`, each entry is `(width, height, quantity)`
+- `non_empty_space: list[dict]`, each entry is a blocked region with keys `x_1`, `x_2`, `y_1`, `y_2`
 
 Return value: a JSON string produced by `packing_lib.make_output(...)` or `packing_lib.output_from_placements(...)`
 
@@ -403,7 +403,7 @@ class Repacking:
 ## Notes
 
 - `make_output` and `output_from_placements` return a JSON **string**, not a dict.
-- `sort_by_quantity` expects dict inputs with a `"quantity"` key — not `[w, h, q]` tuples.
+- `sort_by_quantity` expects dict inputs with a `"quantity"` key, not `[w, h, q]` tuples.
 - `expand_items` drops quantity information; use `expand_type_counts` if you need to reconstruct items from `type_keys` and a (possibly modified) quantities array.
 - `get_configurations` is combinatorial and can be slow with many rectangle types or large bin widths.
 - `solve_fractional_strip_cover` requires `scipy` to be available in the runtime environment.
