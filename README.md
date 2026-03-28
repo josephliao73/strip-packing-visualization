@@ -74,18 +74,6 @@ You can also pass cargo args after `--`:
 ./start.sh up -- --release
 ```
 
-## venv note
-
-The script activates the venv only inside the script process.
-That means your terminal prompt will not change after running `./start.sh`.
-
-If you want to activate it manually yourself:
-
-```bash
-cd packing_interface
-source .venv/bin/activate
-```
-
 ## Running without the script
 
 From `packing_interface/`:
@@ -97,6 +85,9 @@ cargo run
 This skips the runtime detection that `start.sh` does.
 
 ## Templates
+
+<img width="670" height="1056" alt="image" src="https://github.com/user-attachments/assets/e49b1f09-6b06-4854-bd12-ac1a05ab0625" />
+
 
 Templates are stored under:
 
