@@ -1,6 +1,6 @@
 # Packing
 
-This is a desktop ui for 2d strip/bin packing experiments.
+This is a desktop UI for 2D Strip packing visualizations.
 
 ## quick start
 
