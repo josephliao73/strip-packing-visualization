@@ -2,7 +2,9 @@
 
 This is a desktop UI for 2D Strip packing visualizations.
 
-## quick start
+<img width="4384" height="2326" alt="image" src="https://github.com/user-attachments/assets/d2ce203c-7787-48fb-b6eb-b3fde868ac53" />
+
+## Quick start
 
 if you just want to use it:
 
@@ -149,6 +151,9 @@ You can:
 - Drag via double left clicking
 - Save output json
 
+<img width="2884" height="2300" alt="image" src="https://github.com/user-attachments/assets/bd978beb-59ab-4c08-98d3-ed2eae0fe748" />
+
+
 ### Node Tabs
 
 Use a node tab for local repacking inside a selected region.
@@ -160,14 +165,12 @@ Basic flow:
 - Choose a node template from the dropdown
 - Run repacking on just that region
 
+<img width="2886" height="2310" alt="image" src="https://github.com/user-attachments/assets/7bfa3e2b-6202-42fa-b24f-12aac56e9340" />
+
+
 ## Read only templates
 
-For builtin templates:
-- You can click, highlight, and copy
-- You cannot type into them
-- You cannot delete selected text from them
-
-If you want to modify one, use the duplicate / save-as flow and edit the custom copy instead.
+For builtin templates, they are read only. If you want to modify one, use the duplicate button flow and edit the custom copy instead.
 
 ## Output Behavior
 
@@ -183,18 +186,12 @@ Warnings are result of:
 
 Invalid layouts still render so you can see what the algorithm attempted.
 
-## requirements
+## Requirements
 
-minimum practical requirements:
-- rust toolchain
-- python 3 if you want Python algorithms
-- `numpy` and `scipy` if you want python algorithms to run through the app
-- `g++` with c++17 support if you want C++ algorithms
-
-## current status
-
-supported in the ui:
-- python
-- c++
+Minimum practical requirements:
+- Rust toolchain
+- Python 3 if you want Python algorithms
+- `numpy` and `scipy` if you want Python algorithms to run through the app
+- `g++` with C++17 support if you want C++ algorithms
 
 
