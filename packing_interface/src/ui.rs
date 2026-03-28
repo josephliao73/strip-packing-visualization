@@ -152,16 +152,12 @@ impl PackingApp {
             create_template_description_input: String::new(),
             create_template_language: None,
             create_template_from_current: false,
-            template_read_only_hovered: false,
-            bottom_panel_visible: true,
             bottom_panel_tab: BottomPanelTab::Output,
             settings: Settings {
                 area_select_enabled: true,
                 snap_to_rectangles_enabled: true,
                 auto_minimize_height: false,
             },
-            settings_panel_visible: false,
-            area_select_list: Vec::new(),
             new_area_select: true,
             area_select_start: None,
             area_select_current: None,
@@ -176,7 +172,6 @@ impl PackingApp {
             single_unique_types_input: String::new(),
             single_bin_width_input: String::new(),
             batch_bin_width_input: String::new(),
-            display_visual: false,
             multiple_test_cases: Vec::new(),
             multiple_testcase_message: None,
             multiple_run_results: Vec::new(),
@@ -190,7 +185,7 @@ impl PackingApp {
             bottom_panel_height: 150.0,
             is_resizing_panel: false,
             panel_drag_last_y: 0.0,
-            workspace_tab: WorkspaceTab::CreateSingleTestCase,
+            workspace_tab: WorkspaceTab::ImportGenerateTestCases,
         }
     }
 }
@@ -227,7 +222,7 @@ fn generate_random_test_case(rng: &mut impl rand::Rng, n: i32, input_size: Optio
 	    let height = rng.random_range(MIN_HEIGHT..=MAX_HEIGHT);
 	    if !rect_set.contains(&(width, height)) {
 		rect_set.insert((width, height));
-		&rectangles.push(Rectangle { width, height, quantity: 1 });
+		rectangles.push(Rectangle { width, height, quantity: 1 });
 	    }
 	}
 
@@ -358,15 +353,11 @@ impl PackingApp {
             Input::CancelCreateTemplate => {
                 self.close_create_template_modal();
             }
-            Input::TemplateReadOnlyHover(hovered) => {
-                self.template_read_only_hovered = hovered;
-            }
             Input::WorkspaceTabSelected(tab) => {
                 self.workspace_tab = tab;
             }
             Input::DisplayMultipleResult(idx) => {
                 if let Some(result) = self.multiple_run_results.get(idx) {
-                    // If already displayed and tab still exists, just switch to it
                     if let Some(existing_tab_id) = result.tab_id {
                         if self.algo_tabs.iter().any(|t| t.id == existing_tab_id) {
                             self.set_active_algo_tab(existing_tab_id);
@@ -1213,8 +1204,7 @@ impl PackingApp {
                                 bin_y: final_y,
                                 bin_w,
                                 bin_h,
-                                selected_indices: Vec::new(),
-                            };
+                                };
                             self.algo_tabs[tab_idx].selection_regions.push(region);
                         }
                     }
@@ -1288,7 +1278,6 @@ impl PackingApp {
                             bin_y: region.bin_y,
                             bin_w: region.bin_w,
                             bin_h: region.bin_h,
-                            selected_indices: Vec::new(),
                         };
 
                         let (parent_output, parent_revision, parent_visible, parent_animating) = if let Some(parent_tab) = self.algo_tabs.iter().find(|t| t.id == self.active_algo_tab_id) {
@@ -1481,7 +1470,7 @@ fn start_batch_run(&mut self) {
     self.multiple_run_results.clear();
     self.multiple_results_expanded.clear();
     self.active_tab = RightPanelTab::CodeEditor;
-    self.bottom_panel_tab = BottomPanelTab::Output;
+    self.bottom_panel_tab = BottomPanelTab::MultipleTestCases;
     self.error_message = Some(format!("Running batch: 0/{}", total));
 }
 
@@ -2045,7 +2034,6 @@ fn snap_to_rectangles(
         let mut placed = vec![false; placements.len()];
         for &idx in &order {
             let rect_w = placements[idx].width as f32;
-            let rect_h = placements[idx].height as f32;
             let mut x = placements[idx].x.into_inner();
             if bin_width.is_finite() {
                 x = x.clamp(0.0, (bin_width - rect_w).max(0.0));
@@ -2141,7 +2129,6 @@ fn snap_to_rectangles(
             }
         };
         self.create_template_description_input.clear();
-        self.template_read_only_hovered = false;
     }
 
     fn close_create_template_modal(&mut self) {
@@ -2592,10 +2579,9 @@ fn snap_to_rectangles(
         let text = self.rectangle_data.text();
         let mut rectangles: Vec<Rectangle> = Vec::new();
         let mut errors = Vec::new();
-        let mut w_val: i32 = -1;
         let mut total: i32 = 0;
-        let mut Ntemp: i32 = -1;
-        let mut Ktemp: i32 = -1;
+        let mut n_temp: i32 = -1;
+        let mut k_temp: i32 = -1;
         let mut set: HashSet<(i32, i32)> = HashSet::new();
         let mut min_height: i32 = i32::MAX;
         let mut max_height: i32 = i32::MIN;
@@ -2605,15 +2591,17 @@ fn snap_to_rectangles(
             return Err(errors);
         }
 
-        if let Ok(w) = self.w_input.parse::<i32>() {
-            if w < 0 {
-                errors.push("Emter a positive value for the width of the bin".to_string());
+        let w = match self.w_input.parse::<i32>() {
+            Ok(w) => w,
+            Err(_) => {
+                errors.push("Enter an integer value for the width of the bin".to_string());
                 return Err(errors);
             }
-            w_val = w;
-        } else {
-            errors.push("Enter an integer value for the width of the bin".to_string());
-            return Err(errors);           
+        };
+
+        if w < 0 {
+            errors.push("Emter a positive value for the width of the bin".to_string());
+            return Err(errors);
         }
 
         if !self.n_input.is_empty() {
@@ -2622,7 +2610,7 @@ fn snap_to_rectangles(
                     errors.push("Enter an integer value for the quantity of rectangles".to_string());
                     return Err(errors);
                 }
-                Ntemp = n;
+                n_temp = n;
             } else {
                 errors.push("Enter an integer value for the quantity of rectangles".to_string());
             }
@@ -2635,7 +2623,7 @@ fn snap_to_rectangles(
                     errors.push("Enter an integer value for the types f rectangles".to_string());
                     return Err(errors);
                 }
-                Ktemp = k;
+                k_temp = k;
             } else {
                 errors.push("Enter an integer value for the types of rectangles".to_string());
             }
@@ -2674,8 +2662,8 @@ fn snap_to_rectangles(
                     max_height = i32::max(y, max_height);
 
                     total += q;
-                    if x > w_val {
-                        errors.push(format!("Line {}: '{}' is greater than the width {}", line_num+1, parts[0], w_val));
+                    if x > w {
+                        errors.push(format!("Line {}: '{}' is greater than the width {}", line_num+1, parts[0], w));
                     } else if let Some(existing) = rectangles.iter_mut().find(|r| r.width == x && r.height == y) {
                         existing.quantity += q;
                         set.insert((x, y));
@@ -2703,45 +2691,45 @@ fn snap_to_rectangles(
             }
         }
 
-        if !self.autofile && Ntemp != -1 && Ntemp != total {
-            errors.push(format!("The quantity of rectangles is NOT the same as the input. {} rectangles found, {} expected.", total, Ntemp));
+        if !self.autofile && n_temp != -1 && n_temp != total {
+            errors.push(format!("The quantity of rectangles is NOT the same as the input. {} rectangles found, {} expected.", total, n_temp));
         }
 
-        if !self.autofile && Ktemp != -1 && Ktemp != set.len() as i32 {
-            errors.push(format!("The number of types of rectangles is NOT the same as the input. {} types found, {} expected.", set.len(), Ktemp));
+        if !self.autofile && k_temp != -1 && k_temp != set.len() as i32 {
+            errors.push(format!("The number of types of rectangles is NOT the same as the input. {} types found, {} expected.", set.len(), k_temp));
         }
 
         if self.autofile {
             let actual_n = total;
             let actual_k = set.len() as i32;
             
-            if Ktemp != -1 && actual_k > Ktemp {
-                errors.push(format!("The number of types of rectangles is greater than the input. {} types found, {} expected.", actual_k, Ktemp));
+            if k_temp != -1 && actual_k > k_temp {
+                errors.push(format!("The number of types of rectangles is greater than the input. {} types found, {} expected.", actual_k, k_temp));
             }
             
-            if Ntemp != -1 && Ktemp != -1 {
-                let n_difference = Ntemp - actual_n;
-                let k_difference = Ktemp - actual_k;
+            if n_temp != -1 && k_temp != -1 {
+                let n_difference = n_temp - actual_n;
+                let k_difference = k_temp - actual_k;
                 
                 if n_difference > 0 && k_difference > n_difference {
                     errors.push(format!(
                         "Autofill impossible: Need to add {} rectangles but only {} type slots available. \
                         (Input N={}, Actual N={}, Input K={}, Actual K={})",
-                        n_difference, k_difference, Ntemp, actual_n, Ktemp, actual_k
+                        n_difference, k_difference, n_temp, actual_n, k_temp, actual_k
                     ));
                 }
                 
                 if n_difference < 0 {
                     errors.push(format!(
                         "Autofill impossible: Already have {} rectangles but input N={} (cannot remove rectangles)",
-                        actual_n, Ntemp
+                        actual_n, n_temp
                     ));
                 }
             }
         }
         
         if errors.is_empty() {
-            Ok(ParseOutput {width: w_val, quantity: Ntemp, types: Ktemp, autofill: self.autofile, rects: rectangles, input_types: set.len() as i32,min_height, max_height})
+            Ok(ParseOutput {width: w, quantity: n_temp, types: k_temp, autofill: self.autofile, rects: rectangles, input_types: set.len() as i32,min_height, max_height})
         } else {
             Err(errors)
         }
@@ -3200,7 +3188,6 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             animating: tab.animating,
             selected_rects: &self.selected_rects,
             repacked_indices: Some(tab.repacked_indices.as_slice()),
-            obstacle_spaces: Some(tab.obstacle_spaces.as_slice()),
             is_area_selecting: self.is_area_selecting,
             area_select_start: self.area_select_start,
             area_select_current: self.area_select_current,
@@ -4207,23 +4194,14 @@ let visualization_content = if let Some(tab) = self.active_algo_tab() && let Som
             available_templates: self.template_options_for_language(current_language),
             selected_algorithm_description: self.selected_template_for_language(current_language).map(|template| template.description),
             selected_algorithm_is_read_only: self.selected_template_for_language(current_language).map(|template| template.is_read_only()).unwrap_or(false),
-            selected_algorithm_is_builtin: self.selected_template_for_language(current_language).map(|template| template.builtin).unwrap_or(false),
-            template_read_only_hovered: self.template_read_only_hovered,
-            bottom_panel_visible: self.bottom_panel_visible,
             bottom_panel_tab: self.bottom_panel_tab,
             code_errors: self.active_algo_tab().map(|tab| tab.code_errors.as_slice()).unwrap_or(&[]),
             code_output_json: self.active_algo_tab().and_then(|tab| tab.code_output_json.as_deref()),
-            testcase_message: self.testcase_message.as_deref(),
-            multiple_testcase_message: self.multiple_testcase_message.as_deref(),
-            testcase: self.current_testcase.as_ref(),
             is_root: self.active_algo_tab()
                 .map(|t| !t.selection_regions.iter().any(|r| r.is_inherited))
                 .unwrap_or(true),
             has_single_testcase: self.current_testcase.is_some(),
             has_multiple_testcases: !self.multiple_test_cases.is_empty(),
-            num_test_cases_input: &self.num_test_cases_input,
-            input_size_input: &self.input_size_input,
-            unique_types_input: &self.unique_types_input,
             multiple_run_results: &self.multiple_run_results,
             multiple_results_expanded: &self.multiple_results_expanded,
             bottom_panel_height: self.bottom_panel_height,

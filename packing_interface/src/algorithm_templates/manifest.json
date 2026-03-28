@@ -180,6 +180,26 @@
     "is_root": false
   },
   {
+    "id": "rf_python",
+    "name": "RF",
+    "description": "Reverse-Fit 2-approximation strip packing.",
+    "language": "Python",
+    "path": "python/root/rf.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "rf_cpp",
+    "name": "RF",
+    "description": "Reverse-Fit 2-approximation strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/rf.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
     "id": "custom_python_bad_1",
     "name": "bad",
     "description": "123",

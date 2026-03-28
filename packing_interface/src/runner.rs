@@ -1,4 +1,4 @@
-use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, ParseOutput, Rectangle, NonEmptySpace};
+use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, Rectangle, NonEmptySpace};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,6 @@ pub enum RunResult {
 }
 
 pub trait LanguageRunner {
-    fn file_extension(&self) -> &'static str;
     fn run(&self, code: &str, bin_width: i32, rectangles: &[Rectangle]) -> RunResult;
     fn repack_run(&self, code: &str, bin_height: f32, bin_width: f32, rectangles: &[Rectangle], non_empty_space: &[NonEmptySpace]) -> RunResult;
 }
@@ -45,9 +44,6 @@ impl PythonRunner {
 }
 
 impl LanguageRunner for PythonRunner {
-    fn file_extension(&self) -> &'static str {
-        "py"
-    }
 
     fn run(&self, code: &str, bin_width: i32, rectangles: &[Rectangle]) -> RunResult {
         let rectangles_json: Vec<Vec<i32>> = rectangles
@@ -292,9 +288,6 @@ int main(int argc, char* argv[]) {
 }
 
 impl LanguageRunner for CppRunner {
-    fn file_extension(&self) -> &'static str {
-        "cpp"
-    }
 
     fn run(&self, code: &str, bin_width: i32, rectangles: &[Rectangle]) -> RunResult {
         let rectangles_str = match serialize_rectangles(rectangles) {
@@ -506,16 +499,6 @@ pub fn get_runner(language: CodeLanguage) -> Box<dyn LanguageRunner> {
         CodeLanguage::Python => Box::new(PythonRunner),
         CodeLanguage::Cpp => Box::new(CppRunner),
         CodeLanguage::Java => Box::new(PythonRunner), // Java not yet implemented
-    }
-}
-
-pub fn run_code(language: CodeLanguage, code: &str, parsed: &ParseOutput) -> RunResult {
-    match get_runner(language).run(code, parsed.width, &parsed.rects) {
-        RunResult::Success { output, raw_json } => match validate_packing_output(&output) {
-            Ok(()) => RunResult::Success { output, raw_json },
-            Err(warnings) => RunResult::SuccessWithWarnings { output, raw_json, warnings },
-        },
-        other => other,
     }
 }
 

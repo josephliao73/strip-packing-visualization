@@ -111,7 +111,6 @@ pub enum Input {
     ConfirmCreateTemplate,
     CreateTemplateFromCurrent,
     CancelCreateTemplate,
-    TemplateReadOnlyHover(bool),
     RunCode(i32),
     SaveOutputToFile,
     InsertTab,
@@ -167,7 +166,6 @@ pub struct SelectionRegion {
     pub bin_y: f32,
     pub bin_w: f32,
     pub bin_h: f32,
-    pub selected_indices: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -362,14 +360,10 @@ pub struct PackingApp {
     pub create_template_description_input: String,
     pub create_template_language: Option<CodeLanguage>,
     pub create_template_from_current: bool,
-    pub template_read_only_hovered: bool,
     // Bottom panel state
-    pub bottom_panel_visible: bool,
     pub bottom_panel_tab: BottomPanelTab,
     pub settings: Settings,
-    pub settings_panel_visible: bool,
     // Area selection state
-    pub area_select_list: Vec<(f32, f32)>,
     pub new_area_select: bool,
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
@@ -385,7 +379,6 @@ pub struct PackingApp {
     pub single_unique_types_input: String,
     pub single_bin_width_input: String,
     pub batch_bin_width_input: String,
-    pub display_visual: bool,
     pub multiple_test_cases: Vec<JsonInput>,
     pub multiple_testcase_message: Option<String>,
     pub multiple_run_results: Vec<MultipleRunResult>,
@@ -431,7 +424,6 @@ pub struct BinCanvas<'a>  {
     pub animating: bool,
     pub selected_rects: &'a HashSet<usize>,
     pub repacked_indices: Option<&'a [usize]>,
-    pub obstacle_spaces: Option<&'a [NonEmptySpace]>,
     pub is_area_selecting: bool,
     pub area_select_start: Option<(f32, f32)>,
     pub area_select_current: Option<(f32, f32)>,
