@@ -2,3 +2,4 @@
 ./packing_interface/src/node_modules/* 
 ./packing_interface/src/*.json
 ./start1.sh
+./dist/

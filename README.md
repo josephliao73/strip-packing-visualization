@@ -109,6 +109,39 @@ Notes:
 - The container uses software OpenGL (`llvmpipe`) to avoid host GPU-driver mismatches.
 - The image includes Python, `numpy`, `scipy`, and `g++`, so both Python and C++ templates are available inside the container.
 
+## Ubuntu bundle
+
+If you want a native Ubuntu bundle instead of running from the source tree, build one from the repo root:
+
+```bash
+./scripts/package-ubuntu.sh
+```
+
+That creates:
+
+```text
+dist/ubuntu/packing-app/
+  packing-app
+  setup-python.sh
+  bin/packing_interface
+  src/algorithm_templates/
+  src/runner_utils/
+  src/runner_lib/
+```
+
+Run the bundled app with:
+
+```bash
+cd dist/ubuntu/packing-app
+./setup-python.sh
+./packing-app
+```
+
+Notes:
+- `./setup-python.sh` creates a bundle-local `.venv` and installs `numpy` / `scipy`.
+- The launcher auto-detects whether Python and C++ are usable on the host, matching the source-tree runtime detection behavior.
+- The packaged binary now resolves its templates and runner helper files relative to the bundle, so it no longer depends on the original Cargo checkout path.
+
 ## Templates
 
 <img width="670" height="1056" alt="image" src="https://github.com/user-attachments/assets/e49b1f09-6b06-4854-bd12-ac1a05ab0625" />
@@ -208,4 +241,3 @@ Minimum practical requirements:
 - Python 3 if you want Python algorithms
 - `numpy` and `scipy` if you want Python algorithms to run through the app
 - `g++` with C++17 support if you want C++ algorithms
-

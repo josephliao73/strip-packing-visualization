@@ -1,3 +1,4 @@
+use crate::app_paths;
 use crate::types::{AlgorithmOutput, CodeLanguage, JsonInput, Rectangle, NonEmptySpace};
 use std::path::PathBuf;
 
@@ -28,18 +29,11 @@ pub struct PythonRunner;
 
 impl PythonRunner {
     fn get_runner_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src/runner_utils/python_runner.py")
+        app_paths::python_runner_path()
     }
 
     fn get_python_bin() -> std::ffi::OsString {
-        let venv_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(".venv/bin/python3");
-        if venv_python.exists() {
-            venv_python.into_os_string()
-        } else {
-            std::ffi::OsString::from("python3")
-        }
+        app_paths::python_bin_path()
     }
 }
 
@@ -260,7 +254,7 @@ int main(int argc, char* argv[]) {
     }
 
     fn runner_utils_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runner_utils")
+        app_paths::runner_utils_dir()
     }
 
     fn compile(source_path: &std::path::Path, binary_path: &std::path::Path) -> Option<RunResult> {

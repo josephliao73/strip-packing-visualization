@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$BUNDLE_DIR/.venv"
+CPP_MIN_MAJOR=8
+
+python_runtime_cmd() {
+  if [ -x "$VENV_DIR/bin/python3" ]; then
+    printf '%s\n' "$VENV_DIR/bin/python3"
+    return 0
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+
+  return 1
+}
+
+verify_python_runtime() {
+  local py
+  py="$(python_runtime_cmd)" || {
+    echo "Python runtime unavailable: python3 not found." >&2
+    return 1
+  }
+
+  if ! "$py" -c "import numpy, scipy" >/dev/null 2>&1; then
+    echo "Python runtime unavailable: failed to import numpy/scipy with $py." >&2
+    echo "Run ./setup-python.sh inside the bundle to install the bundled Python dependencies." >&2
+    return 1
+  fi
+}
+
+verify_cpp_runtime() {
+  if ! command -v g++ >/dev/null 2>&1; then
+    echo "C++ runtime unavailable: g++ not found." >&2
+    return 1
+  fi
+
+  local version major
+  version="$(g++ -dumpfullversion -dumpversion 2>/dev/null | head -n 1)"
+  major="${version%%.*}"
+
+  if [[ ! "$major" =~ ^[0-9]+$ ]] || [ "$major" -lt "$CPP_MIN_MAJOR" ]; then
+    echo "C++ runtime unavailable: g++ $version is too old. Need g++ $CPP_MIN_MAJOR+ with C++17 support." >&2
+    return 1
+  fi
+
+  local tmp_bin
+  tmp_bin="$(mktemp /tmp/packing-cpp-check-XXXXXX)"
+  if ! printf 'int main() { return 0; }\n' | g++ -std=c++17 -x c++ - -o "$tmp_bin" >/dev/null 2>&1; then
+    rm -f "$tmp_bin"
+    echo "C++ runtime unavailable: g++ failed a C++17 compile check." >&2
+    return 1
+  fi
+
+  rm -f "$tmp_bin"
+}
+
+RUNTIME_ARGS=()
+
+if verify_python_runtime >/dev/null 2>&1; then
+  RUNTIME_ARGS+=(python)
+else
+  verify_python_runtime || true
+fi
+
+if verify_cpp_runtime >/dev/null 2>&1; then
+  RUNTIME_ARGS+=(cpp)
+else
+  verify_cpp_runtime || true
+fi
+
+if [ ${#RUNTIME_ARGS[@]} -eq 0 ]; then
+  echo "No supported Python or C++ runtime detected. The app will start with both language options hidden." >&2
+fi
+
+exec "$BUNDLE_DIR/bin/packing_interface" "${RUNTIME_ARGS[@]}"

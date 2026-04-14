@@ -1,0 +1,60 @@
+import packing_lib
+
+
+class Repacking:
+    def solve(self, bin_height, bin_width, rectangles, non_empty_space):
+        items = packing_lib.sort_by_height(packing_lib.expand_items(rectangles))
+        blockers = packing_lib.normalize_obstacles(non_empty_space)
+        placements = []
+        levels = []
+
+        for item in items:
+            width = item["width"]
+            height = item["height"]
+            placed = False
+
+            for level in levels:
+                x = packing_lib.leftmost_feasible_x_for_band(
+                    blockers, level["y"], level["height"], width, bin_width, bin_height
+                )
+                if x is None:
+                    continue
+
+                placement = (x, level["y"], width, height)
+                placements.append(placement)
+                packing_lib.append_placement_as_blocker(blockers, placement)
+                placed = True
+                break
+
+            if placed:
+                continue
+
+            start_y = max((level["y"] + level["height"] for level in levels), default=0)
+            level_y = packing_lib.next_level_y(blockers, start_y, height, bin_width, bin_height)
+            if level_y is not None:
+                levels.append({"y": level_y, "height": height})
+                x = packing_lib.leftmost_feasible_x_for_band(
+                    blockers, level_y, height, width, bin_width, bin_height
+                )
+                if x is not None:
+                    placement = (x, level_y, width, height)
+                else:
+                    position = packing_lib.find_bottom_left_position_with_obstacles(
+                        blockers, bin_width, bin_height, width, height
+                    )
+                    if position is None:
+                        raise ValueError(f"Unable to place rectangle {width}x{height} with FFDH node packing")
+                    x, y = position
+                    placement = (x, y, width, height)
+            else:
+                position = packing_lib.find_bottom_left_position_with_obstacles(
+                    blockers, bin_width, bin_height, width, height
+                )
+                if position is None:
+                    raise ValueError(f"Unable to place rectangle {width}x{height} with FFDH node packing")
+                x, y = position
+                placement = (x, y, width, height)
+            placements.append(placement)
+            packing_lib.append_placement_as_blocker(blockers, placement)
+
+        return packing_lib.output_from_placements(bin_width, placements)

@@ -1,7 +1,7 @@
 use crate::types::CodeLanguage;
+use crate::app_paths;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
 
 const CREATE_NEW_TEMPLATE_ID: &str = "__create_new__";
 
@@ -490,8 +490,8 @@ fn save_manifest(templates: &[AlgorithmTemplateEntry]) -> Result<(), String> {
         .map_err(|error| format!("Failed to write {}: {}", manifest_path.display(), error))
 }
 
-fn template_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/algorithm_templates")
+fn template_dir() -> std::path::PathBuf {
+    app_paths::template_dir()
 }
 
 fn language_dir(language: CodeLanguage) -> &'static str {

@@ -1,0 +1,252 @@
+[
+  {
+    "id": "blank_python",
+    "name": "Blank",
+    "description": "Minimal starter template using the helper library.",
+    "language": "Python",
+    "path": "python/root/blank.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "blank_cpp",
+    "name": "Blank",
+    "description": "Minimal starter template using the helper library.",
+    "language": "Cpp",
+    "path": "cpp/root/blank.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "nfdh_python",
+    "name": "NFDH",
+    "description": "Next-Fit Decreasing Height strip packing.",
+    "language": "Python",
+    "path": "python/root/nfdh.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "nfdh_cpp",
+    "name": "NFDH",
+    "description": "Next-Fit Decreasing Height strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/nfdh.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "ffdh_python",
+    "name": "FFDH",
+    "description": "First-Fit Decreasing Height strip packing.",
+    "language": "Python",
+    "path": "python/root/ffdh.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bfdh_python",
+    "name": "BFDH",
+    "description": "Best-Fit Decreasing Height strip packing.",
+    "language": "Python",
+    "path": "python/root/bfdh.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bl_python",
+    "name": "BL",
+    "description": "Bottom-Left strip packing ordered by non-increasing width.",
+    "language": "Python",
+    "path": "python/root/bl.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "ffdh_cpp",
+    "name": "FFDH",
+    "description": "First-Fit Decreasing Height strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/ffdh.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bfdh_cpp",
+    "name": "BFDH",
+    "description": "Best-Fit Decreasing Height strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/bfdh.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "bl_cpp",
+    "name": "BL",
+    "description": "Bottom-Left strip packing ordered by non-increasing width.",
+    "language": "Cpp",
+    "path": "cpp/root/bl.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "ud_cpp",
+    "name": "UD",
+    "description": "Baker's Up-Down strip packing with BL-style regions and a small-item shelf fallback.",
+    "language": "Cpp",
+    "path": "cpp/root/ud.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "sleator_cpp",
+    "name": "Sleator",
+    "description": "Sleator's 2.5-approximation strip-packing heuristic.",
+    "language": "Cpp",
+    "path": "cpp/root/sleator.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "fspp_python",
+    "name": "FSPP",
+    "description": "Fractional strip-packing template.",
+    "language": "Python",
+    "path": "python/root/fspp.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "three_fspp_python",
+    "name": "3FSPP",
+    "description": "Three-strip fractional strip-packing template.",
+    "language": "Python",
+    "path": "python/root/three_fspp.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "ud_python",
+    "name": "UD",
+    "description": "Baker's Up-Down strip packing with BL-style regions and a small-item shelf fallback.",
+    "language": "Python",
+    "path": "python/root/ud.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "sleator_python",
+    "name": "Sleator",
+    "description": "Sleator's 2.5-approximation strip-packing heuristic.",
+    "language": "Python",
+    "path": "python/root/sleator.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "blank_node_python",
+    "name": "Blank Node",
+    "description": "Minimal starter repacking template.",
+    "language": "Python",
+    "path": "python/node/blank.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": false
+  },
+  {
+    "id": "blank_node_cpp",
+    "name": "Blank Node",
+    "description": "Minimal starter repacking template.",
+    "language": "Cpp",
+    "path": "cpp/node/blank.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": false
+  },
+  {
+    "id": "rf_python",
+    "name": "RF",
+    "description": "Reverse-Fit 2-approximation strip packing.",
+    "language": "Python",
+    "path": "python/root/rf.py",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "rf_cpp",
+    "name": "RF",
+    "description": "Reverse-Fit 2-approximation strip packing.",
+    "language": "Cpp",
+    "path": "cpp/root/rf.cpp",
+    "builtin": true,
+    "editable": false,
+    "is_root": true
+  },
+  {
+    "id": "custom_python_nfdh_copy_sdf_1",
+    "name": "NFDH Copy sdf",
+    "description": "s",
+    "language": "Python",
+    "path": "python/root/custom_python_nfdh_copy_sdf_1.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
+  },
+  {
+    "id": "custom_python_nfdh_copy_as_1",
+    "name": "NFDH Copy as",
+    "description": "asd",
+    "language": "Python",
+    "path": "python/root/custom_python_nfdh_copy_as_1.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
+  },
+  {
+    "id": "custom_python_nfdh_copy_sdf_2",
+    "name": "NFDH Copy sdf",
+    "description": "asd",
+    "language": "Python",
+    "path": "python/node/custom_python_nfdh_copy_sdf_2.py",
+    "builtin": false,
+    "editable": true,
+    "is_root": false
+  },
+  {
+    "id": "custom_cpp_blank_copyd_1",
+    "name": "Blank Copyd",
+    "description": "sdf",
+    "language": "Cpp",
+    "path": "cpp/root/custom_cpp_blank_copyd_1.cpp",
+    "builtin": false,
+    "editable": true,
+    "is_root": true
+  },
+  {
+    "id": "custom_cpp_blank_node_copy_1",
+    "name": "Blank Node Copy",
+    "description": "sdfsdf",
+    "language": "Cpp",
+    "path": "cpp/node/custom_cpp_blank_node_copy_1.cpp",
+    "builtin": false,
+    "editable": true,
+    "is_root": false
+  }
+]
