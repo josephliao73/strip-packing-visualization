@@ -13,6 +13,8 @@ if you just want to use it:
 ./start.sh start
 ```
 
+The app now bundles its UI font directly, so text rendering does not depend on the host machine having the same desktop fonts installed.
+
 Features:
 - Make or import test cases
 - Run Python or C++ packing algorithms from inside the app
@@ -83,6 +85,29 @@ cargo run
 ```
 
 This skips the runtime detection that `start.sh` does.
+
+## Docker on Ubuntu/Linux
+
+If you want to run the GUI without installing Rust locally, build the provided image from the repo root:
+
+```bash
+docker build -t packing-app .
+```
+
+For X11 desktops on Ubuntu, allow local Docker containers to use your display and then run:
+
+```bash
+xhost +local:docker
+docker run --rm \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  packing-app
+```
+
+Notes:
+- This is mainly for Linux desktops. A `.dmg` would only help macOS users and an `.exe` would only help Windows users.
+- The container uses software OpenGL (`llvmpipe`) to avoid host GPU-driver mismatches.
+- The image includes Python, `numpy`, `scipy`, and `g++`, so both Python and C++ templates are available inside the container.
 
 ## Templates
 
@@ -183,5 +208,4 @@ Minimum practical requirements:
 - Python 3 if you want Python algorithms
 - `numpy` and `scipy` if you want Python algorithms to run through the app
 - `g++` with C++17 support if you want C++ algorithms
-
 
