@@ -142,6 +142,47 @@ Notes:
 - The launcher auto-detects whether Python and C++ are usable on the host, matching the source-tree runtime detection behavior.
 - The packaged binary now resolves its templates and runner helper files relative to the bundle, so it no longer depends on the original Cargo checkout path.
 
+## Windows bundle
+
+From a Windows machine, build a native bundle from the repo root with either:
+
+```powershell
+.\scripts\package-windows.ps1
+```
+
+or:
+
+```bat
+scripts\package-windows.bat
+```
+
+That creates:
+
+```text
+dist\windows\packing-app\
+  packing-app.bat
+  packing-app.ps1
+  setup-python.bat
+  bin\packing_interface.exe
+  src\algorithm_templates\
+  src\runner_utils\
+  src\runner_lib\
+```
+
+Run the bundled app with:
+
+```bat
+cd dist\windows\packing-app
+setup-python.bat
+packing-app.bat
+```
+
+Notes:
+- `setup-python.bat` creates a bundle-local `.venv` and installs `numpy` / `scipy`.
+- The launcher enables Python only when the bundled `.venv` or host `python` can import those packages.
+- The launcher enables C++ only when `g++` is installed on the host and passes a C++17 compile check.
+- The packaged binary resolves templates and runner helper files relative to the bundle, so the `.exe` can run outside the original source checkout.
+
 ## Templates
 
 <img width="670" height="1056" alt="image" src="https://github.com/user-attachments/assets/e49b1f09-6b06-4854-bd12-ac1a05ab0625" />

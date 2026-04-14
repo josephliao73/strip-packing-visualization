@@ -43,10 +43,23 @@ pub fn python_runner_path() -> PathBuf {
 }
 
 pub fn python_bin_path() -> std::ffi::OsString {
-    candidate_roots()
+    let venv_python = candidate_roots().into_iter().find_map(|root| {
+        [
+            root.join(".venv/bin/python3"),
+            root.join(".venv/Scripts/python.exe"),
+            root.join(".venv/Scripts/python"),
+        ]
         .into_iter()
-        .map(|root| root.join(".venv/bin/python3"))
         .find(|path| path.exists())
+    });
+
+    venv_python
         .map(PathBuf::into_os_string)
-        .unwrap_or_else(|| std::ffi::OsString::from("python3"))
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                std::ffi::OsString::from("python")
+            } else {
+                std::ffi::OsString::from("python3")
+            }
+        })
 }
