@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS builder
+FROM rust:latest AS builder
 
 WORKDIR /app/packing_interface
 
@@ -21,21 +21,23 @@ RUN apt-get update -o Acquire::Retries=3 -o APT::Update::Error-Mode=any && apt-g
     && rm -rf /var/lib/apt/lists/*
 
 COPY packing_interface/Cargo.toml packing_interface/Cargo.lock ./
-RUN mkdir src && printf 'fn main() {}\n' > src/main.rs && cargo build --release && rm -rf src
-
 COPY packing_interface/src ./src
 COPY packing_interface/requirements.txt ./requirements.txt
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update -o Acquire::Retries=3 -o APT::Update::Error-Mode=any && apt-get install -y --no-install-recommends \
     g++ \
-    libasound2 \
+    libasound2t64 \
     libegl1 \
     libfontconfig1 \
     libfreetype6 \
     libgl1 \
+    libgl1-mesa-dri \
+    libegl-mesa0 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
     libwayland-client0 \
     libx11-6 \
     libxcursor1 \
@@ -43,6 +45,7 @@ RUN apt-get update -o Acquire::Retries=3 -o APT::Update::Error-Mode=any && apt-g
     libxkbcommon0 \
     libxi6 \
     libxrandr2 \
+    libxkbcommon-x11-0 \
     python3 \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
@@ -57,7 +60,9 @@ COPY packing_interface/requirements.txt ./requirements.txt
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements.txt
 
+
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV GALLIUM_DRIVER=llvmpipe
+ENV WGPU_BACKEND=vulkan
 
 CMD ["./packing_interface", "python", "cpp"]
