@@ -31,6 +31,7 @@ fn main() -> iced::Result {
 
     iced::application("Packing App", PackingApp::update, PackingApp::view)
         .theme(|_| iced::Theme::TokyoNight)
+        .default_font(iced::Font::MONOSPACE)
         .subscription(PackingApp::subscription)
         .run_with(|| (PackingApp::default(lang_map), iced::Task::none()))
 }

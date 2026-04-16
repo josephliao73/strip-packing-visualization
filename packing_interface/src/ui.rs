@@ -2724,7 +2724,7 @@ fn snap_to_rectangles(
     }
 
     pub fn view(&self) -> Element<'_, Input> {
-        let ui_font = Font::default();
+        let ui_font = Font::MONOSPACE;
         
         let title = text("Input")
             .size(26)

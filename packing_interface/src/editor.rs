@@ -101,7 +101,7 @@ fn build_algorithm_template_selector<'a>(
 }
 
 fn build_branch_template_button() -> Element<'static, Input> {
-    button(text("Duplicate").size(11).font(Font::default()))
+    button(text("Duplicate").size(11).font(Font::MONOSPACE))
         .on_press(Input::CreateTemplateFromCurrent)
         .padding([6, 12])
         .style(|_theme: &Theme, status| {
@@ -132,7 +132,7 @@ fn build_run_action_button(
     primary: bool,
 ) -> Element<'static, Input> {
     let mut btn = button(
-        container(text(label).size(if compact { 12 } else { 14 }).font(Font::default()))
+        container(text(label).size(if compact { 12 } else { 14 }).font(Font::MONOSPACE))
             .center_x(Length::Fill)
     );
 
@@ -244,7 +244,7 @@ fn build_code_editor<'a>(
 }
 
 fn build_results_header(show_batch_results: bool) -> Element<'static, Input> {
-    let ui_font = Font::default();
+    let ui_font = Font::MONOSPACE;
 
     container(
         row![
@@ -287,7 +287,7 @@ fn build_results_header(show_batch_results: bool) -> Element<'static, Input> {
 }
 
 fn build_save_output_button() -> Element<'static, Input> {
-    let ui_font = Font::default();
+    let ui_font = Font::MONOSPACE;
 
     button(
         row![text("Save to File").size(11).font(ui_font),]
@@ -316,7 +316,7 @@ fn build_save_output_button() -> Element<'static, Input> {
 }
 
 fn build_output_content<'a>(json: Option<&'a str>, errors: &'a [String]) -> Element<'a, Input> {
-    let ui_font = Font::default();
+    let ui_font = Font::MONOSPACE;
 
     if let Some(json) = json {
         let warnings: Element<'a, Input> = if errors.is_empty() {
@@ -472,7 +472,7 @@ fn build_multi_run_results_content<'a>(
     batch_run_completed: usize,
     batch_run_total: usize,
 ) -> Element<'a, Input> {
-    let ui_font = Font::default();
+    let ui_font = Font::MONOSPACE;
 
     let valid_heights: Vec<f32> = results.iter().filter_map(|r| r.height).collect();
     let avg_str = if valid_heights.is_empty() {
@@ -724,7 +724,7 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
     let language_controls: Element<'a, Input> = if available_languages.is_empty() {
         text("No supported runtimes detected")
             .size(12)
-            .font(Font::default())
+            .font(Font::MONOSPACE)
             .style(|_theme: &Theme| text::Style {
                 color: Some(Color::from_rgb(0.78, 0.55, 0.55)),
             })
@@ -732,7 +732,7 @@ pub fn build_code_panel<'a>(state: EditorState<'a>) -> Element<'a, Input> {
     } else if available_languages.len() == 1 {
         text(state.selected_language.to_string())
             .size(12)
-            .font(Font::default())
+            .font(Font::MONOSPACE)
             .style(|_theme: &Theme| text::Style {
                 color: Some(Color::from_rgb(0.82, 0.84, 0.92)),
             })
