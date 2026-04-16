@@ -4,10 +4,9 @@ set -euo pipefail
 # winit/mesa expect a writable runtime dir even on X11-only sessions.
 if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "${XDG_RUNTIME_DIR:-}" ]; then
   export XDG_RUNTIME_DIR=/tmp/runtime-root
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 700 "$XDG_RUNTIME_DIR"
 fi
-
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
 
 # If the host passed an X11 display, steer the app away from Wayland probing.
 if [ -n "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${WAYLAND_SOCKET:-}" ]; then

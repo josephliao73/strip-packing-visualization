@@ -91,23 +91,62 @@ This skips the runtime detection that `start.sh` does.
 If you want to run the GUI without installing Rust locally, build the provided image from the repo root:
 
 ```bash
-docker build -t packing-app .
+docker build -t strip-packing .
 ```
 
-For X11 desktops on Ubuntu, allow local Docker containers to use your display and then run:
+For native Linux X11 desktops such as Ubuntu or Debian, allow local Docker containers to use your display and then run:
+
+```bash
+xhost +local:docker
+docker run --rm \
+  -e DISPLAY="$DISPLAY" \
+  -e XDG_RUNTIME_DIR=/tmp/runtime-root \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --ipc=host \
+  strip-packing
+```
+
+For WSL2 with WSLg, this also worked:
+
+```bash
+docker run --rm \
+  -e DISPLAY=$DISPLAY \
+  -e XDG_RUNTIME_DIR=/tmp \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --ipc=host \
+  strip-packing
+```
+
+For native Linux Wayland desktops, mount the compositor socket into the container's runtime dir and pass the socket name through:
+
+```bash
+docker run --rm \
+  -e XDG_RUNTIME_DIR=/tmp/runtime-root \
+  -e WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0} \
+  -v "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:/tmp/runtime-root/${WAYLAND_DISPLAY:-wayland-0}" \
+  strip-packing
+```
+
+If your desktop also exposes XWayland and you want to keep the X11 fallback available inside the same container session, pass both sets of variables:
 
 ```bash
 xhost +local:docker
 docker run --rm \
   -e DISPLAY=$DISPLAY \
+  -e XDG_RUNTIME_DIR=/tmp/runtime-root \
+  -e WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0} \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
-  packing-app
+  -v "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:/tmp/runtime-root/${WAYLAND_DISPLAY:-wayland-0}" \
+  --ipc=host \
+  strip-packing
 ```
 
 Notes:
 - This is mainly for Linux desktops. A `.dmg` would only help macOS users and an `.exe` would only help Windows users.
-- The container uses software OpenGL (`llvmpipe`) to avoid host GPU-driver mismatches.
+- Native builds use the default `wgpu` renderer for performance.
+- The Docker image is built with `iced`'s `tiny-skia` software renderer because it is more reliable for containerized Linux GUI sessions.
 - The image includes Python, `numpy`, `scipy`, and `g++`, so both Python and C++ templates are available inside the container.
+- The Wayland examples above intentionally mount only the single socket file instead of the host runtime directory, which avoids permission problems with host-managed `XDG_RUNTIME_DIR` paths.
 
 ## Ubuntu bundle
 

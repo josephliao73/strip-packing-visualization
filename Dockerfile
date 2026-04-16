@@ -23,7 +23,7 @@ RUN apt-get update -o Acquire::Retries=3 -o APT::Update::Error-Mode=any && apt-g
 COPY packing_interface/Cargo.toml packing_interface/Cargo.lock ./
 COPY packing_interface/src ./src
 COPY packing_interface/requirements.txt ./requirements.txt
-RUN cargo build --release
+RUN cargo build --release --no-default-features --features renderer-tiny-skia
 
 FROM debian:trixie-slim
 
