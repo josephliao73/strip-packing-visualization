@@ -53,16 +53,19 @@ RUN apt-get update -o Acquire::Retries=3 -o APT::Update::Error-Mode=any && apt-g
 WORKDIR /app/packing_interface
 
 COPY --from=builder /app/packing_interface/target/release/packing_interface ./packing_interface
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY packing_interface/src/algorithm_templates ./src/algorithm_templates
 COPY packing_interface/src/runner_utils ./src/runner_utils
 COPY packing_interface/src/runner_lib ./src/runner_lib
 COPY packing_interface/requirements.txt ./requirements.txt
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements.txt
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV GALLIUM_DRIVER=llvmpipe
-ENV WGPU_BACKEND=vulkan
+ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["./packing_interface", "python", "cpp"]

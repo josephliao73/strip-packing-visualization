@@ -5,10 +5,9 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
-iced = { version = "0.13.1", features = ["canvas", "tokio", "svg", "highlighter"] }
+iced = { version = "0.13.1", default-features = false, features = ["tiny-skia", "fira-sans", "auto-detect-theme", "canvas", "tokio", "svg", "highlighter"] }
 serde = {version = "1.0.228", features = ["derive"]}
 rfd = "0.14"
 rand = "0.9.2"
 serde_json = "1.0.145"
 ordered-float = { version = "5.1.0", features = ["serde"] }
-
